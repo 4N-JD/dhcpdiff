@@ -143,6 +143,31 @@ impl OptionResolver {
         key.clone()
     }
 
+    /// Map a vendor option-space name via confirmed equivalences.
+    ///
+    /// When every confirmed equivalence for `space` shares the same target space,
+    /// that target is returned (so `vendor-option-space` stays aligned with remapped
+    /// option keys). Conflicting or missing mappings leave the name unchanged.
+    pub fn canonicalize_space(&self, space: &str) -> String {
+        let mut targets = BTreeSet::new();
+        for eq in &self.equivalences {
+            if eq.confirmed && eq.source.space == space {
+                targets.insert(eq.target.space.clone());
+            }
+        }
+        if targets.len() == 1 {
+            targets.into_iter().next().unwrap()
+        } else {
+            space.to_string()
+        }
+    }
+
+    fn rewrite_vendor_option_space(&self, space: &mut Option<String>) {
+        if let Some(name) = space.as_mut() {
+            *name = self.canonicalize_space(name);
+        }
+    }
+
     pub fn is_unknown(&self, key: &OptionKey) -> bool {
         key.is_unresolved()
     }
@@ -220,10 +245,12 @@ impl OptionResolver {
         config.global_options = self.rewrite_map(std::mem::take(&mut config.global_options), &config.option_definitions);
         for filter in &mut config.global_filters {
             filter.options = self.rewrite_map(std::mem::take(&mut filter.options), &config.option_definitions);
+            self.rewrite_vendor_option_space(&mut filter.vendor_option_space);
         }
         for rule in &mut config.conditional_rules {
             rule.options =
                 self.rewrite_map(std::mem::take(&mut rule.options), &config.option_definitions);
+            self.rewrite_vendor_option_space(&mut rule.vendor_option_space);
         }
         for shared in config.shared_networks.values_mut() {
             shared.options =
@@ -240,6 +267,7 @@ impl OptionResolver {
             for filter in &mut subnet.filters {
                 filter.options =
                     self.rewrite_map(std::mem::take(&mut filter.options), &config.option_definitions);
+                self.rewrite_vendor_option_space(&mut filter.vendor_option_space);
             }
         }
     }

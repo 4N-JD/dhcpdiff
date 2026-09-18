@@ -799,6 +799,74 @@ fn scenario_class_vs_if_equivalent() {
 }
 
 #[test]
+fn equivalence_rewrites_vendor_option_space_for_scenario_gating() {
+    // BlueCat MSFT50 vs Infoblox Microsoft-Windows-Options: equivalences must
+    // remap both option keys and vendor-option-space so VCI gating still allows
+    // the remapped options on the source side.
+    let registry = VendorRegistry::new();
+    let mut resolver = OptionResolver::load(None, ResolverOptions::default()).unwrap();
+    resolver.apply_user_mappings(dhcpdiff::options::mappings::UserMappings {
+        equivalences: vec![dhcpdiff::options::mappings::EquivalenceMapping {
+            source: dhcpdiff::options::OptionKeyRef {
+                space: "MSFT50".into(),
+                code: 1,
+            },
+            target: dhcpdiff::options::OptionKeyRef {
+                space: "Microsoft-Windows-Options".into(),
+                code: 1,
+            },
+            confirmed: true,
+        }],
+        ..Default::default()
+    });
+
+    let mut source = registry
+        .parse_and_normalize(
+            "bluecat",
+            &Input::from_path(fixture("scenario/msft_space_bcn.conf")).unwrap(),
+        )
+        .unwrap();
+    let mut target = registry
+        .parse_and_normalize(
+            "infoblox",
+            &Input::from_path(fixture("scenario/msft_space_ibx.conf")).unwrap(),
+        )
+        .unwrap();
+    resolver.resolve_config(&mut source);
+    resolver.resolve_config(&mut target);
+
+    assert_eq!(
+        source.conditional_rules[0].vendor_option_space.as_deref(),
+        Some("Microsoft-Windows-Options"),
+        "vendor-option-space should follow space equivalences"
+    );
+
+    let report = dhcpdiff::diff::diff_configs(&source, &target);
+    let msft_option_diffs: Vec<_> = report
+        .entries
+        .iter()
+        .filter(|e| match e {
+            DiffEntry::Changed { entity, .. }
+            | DiffEntry::MissingInTarget { entity, .. }
+            | DiffEntry::ExtraInTarget { entity, .. }
+                if entity.kind == "option"
+                    && (entity.key.contains("MSFT50")
+                        || entity.key.contains("Microsoft-Windows-Options")
+                        || entity.key.contains("vci=MSFT 5.0")) =>
+            {
+                true
+            }
+            _ => false,
+        })
+        .collect();
+    assert!(
+        msft_option_diffs.is_empty(),
+        "MSFT50↔Microsoft-Windows-Options should match under VCI after equivalence: {:?}",
+        msft_option_diffs
+    );
+}
+
+#[test]
 fn scenario_pool_vci_option_change_detected() {
     let source = load("infoblox", fixture("scenario/pool_vci_a.conf"));
     let target = load("infoblox", fixture("scenario/pool_vci_b.conf"));

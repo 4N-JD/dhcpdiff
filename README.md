@@ -92,6 +92,8 @@ ignore:
 ignore_subnet_mask: true
 ```
 
+Confirmed equivalences also rewrite `vendor-option-space` when every mapped code for a source space shares the same target space (for example `MSFT50` → `Microsoft-Windows-Options`), so VCI scenario gating stays aligned with remapped option keys.
+
 ## Option inheritance
 
 ISC DHCP (Infoblox, BlueCat, and generic `dhcpd.conf`) inherits options and BOOTP packet fields down the scope hierarchy unless overridden:
