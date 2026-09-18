@@ -93,6 +93,12 @@ pub const BOOTP_NEXT_SERVER: u16 = 0;
 pub const BOOTP_FILENAME: u16 = 1;
 pub const BOOTP_SERVER_NAME: u16 = 2;
 
+/// Synthetic codes for ISC server statements in the `isc` space.
+/// These are never DHCP option codes (e.g. lease times are not dhcp:51).
+pub const ISC_DEFAULT_LEASE_TIME: u16 = 0;
+pub const ISC_MIN_LEASE_TIME: u16 = 1;
+pub const ISC_MAX_LEASE_TIME: u16 = 2;
+
 impl OptionKey {
     pub fn dhcp(code: u16) -> Self {
         Self {
@@ -104,6 +110,13 @@ impl OptionKey {
     pub fn bootp(code: u16) -> Self {
         Self {
             space: "bootp".to_string(),
+            code,
+        }
+    }
+
+    pub fn isc(code: u16) -> Self {
+        Self {
+            space: "isc".to_string(),
             code,
         }
     }
@@ -121,6 +134,21 @@ impl OptionKey {
     /// ISC `server-name` (BOOTP sname).
     pub fn bootp_server_name() -> Self {
         Self::bootp(BOOTP_SERVER_NAME)
+    }
+
+    /// ISC `default-lease-time`.
+    pub fn isc_default_lease_time() -> Self {
+        Self::isc(ISC_DEFAULT_LEASE_TIME)
+    }
+
+    /// ISC `min-lease-time`.
+    pub fn isc_min_lease_time() -> Self {
+        Self::isc(ISC_MIN_LEASE_TIME)
+    }
+
+    /// ISC `max-lease-time`.
+    pub fn isc_max_lease_time() -> Self {
+        Self::isc(ISC_MAX_LEASE_TIME)
     }
 
     pub fn qualified(space: impl Into<String>, code: u16) -> Self {
@@ -147,6 +175,11 @@ impl OptionKey {
     /// BOOTP packet fields — always client-effective, never vendor-gated.
     pub fn is_bootp(&self) -> bool {
         self.space == "bootp"
+    }
+
+    /// ISC server statements — always client-effective, never vendor-gated.
+    pub fn is_isc(&self) -> bool {
+        self.space == "isc"
     }
 
     /// Original option name when this key was synthesized for an unresolved name.

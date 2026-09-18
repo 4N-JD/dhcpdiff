@@ -1,19 +1,25 @@
 from __future__ import annotations
 
-import tempfile
 from pathlib import Path
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from .diff_runner import DEFAULT_VENDORS, load_default_mapping, run_diff
-from .entity_display import enrich_entries_with_display
-from .snippets import enrich_entries_with_snippets
+from .diff_runner import DEFAULT_VENDORS, load_default_mapping
+from .jobs import JobError, create_job_from_upload, get_entry, get_job_summary, list_entries, read_lines
 
 STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
 
 app = FastAPI(title="dhcpdiff web", version="0.1.0")
+
+
+def _as_bool(v: str) -> bool:
+    return str(v).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _raise_job_error(exc: JobError) -> None:
+    raise HTTPException(status_code=exc.status_code, detail=exc.detail)
 
 
 @app.get("/api/health")
@@ -31,22 +37,15 @@ def defaults() -> dict:
     }
 
 
-@app.post("/api/diff")
-async def diff_configs(
-    source: UploadFile = File(...),
-    target: UploadFile = File(...),
-    source_vendor: str = Form("auto"),
-    target_vendor: str = Form("auto"),
-    mapping_yaml: str = Form(""),
-    ignore_unmapped: str = Form("true"),
-    ignore_subnet_mask: str = Form("true"),
+async def _create_job_response(
+    source: UploadFile,
+    target: UploadFile,
+    source_vendor: str,
+    target_vendor: str,
+    mapping_yaml: str,
+    ignore_unmapped: str,
+    ignore_subnet_mask: str,
 ) -> dict:
-    def as_bool(v: str) -> bool:
-        return str(v).strip().lower() in {"1", "true", "yes", "on"}
-
-    ignore_unmapped_b = as_bool(ignore_unmapped)
-    ignore_subnet_mask_b = as_bool(ignore_subnet_mask)
-
     source_bytes = await source.read()
     target_bytes = await target.read()
     if not source_bytes:
@@ -58,48 +57,102 @@ async def diff_configs(
     target_name = Path(target.filename or "target.conf").name
     mapping_text = mapping_yaml if mapping_yaml.strip() else load_default_mapping()
 
-    with tempfile.TemporaryDirectory(prefix="dhcpdiff-web-") as tmp:
-        tmp_path = Path(tmp)
-        source_path = tmp_path / source_name
-        target_path = tmp_path / target_name
-        mapping_path = tmp_path / "user.yaml"
-        source_path.write_bytes(source_bytes)
-        target_path.write_bytes(target_bytes)
-        mapping_path.write_text(mapping_text, encoding="utf-8")
-
-        result = run_diff(
-            source_path=source_path,
-            target_path=target_path,
-            source_vendor=source_vendor,
-            target_vendor=target_vendor,
-            mapping_path=mapping_path,
-            ignore_unmapped=ignore_unmapped_b,
-            ignore_subnet_mask=ignore_subnet_mask_b,
+    try:
+        summary = create_job_from_upload(
+            source_bytes=source_bytes,
+            target_bytes=target_bytes,
+            source_name=source_name,
+            target_name=target_name,
+            mapping_text=mapping_text,
+            source_vendor=source_vendor or "auto",
+            target_vendor=target_vendor or "auto",
+            ignore_unmapped=_as_bool(ignore_unmapped),
+            ignore_subnet_mask=_as_bool(ignore_subnet_mask),
         )
+    except JobError as exc:
+        _raise_job_error(exc)
 
-        if not result.ok:
-            status = 400 if result.error_kind == "unmapped" else 500
-            if result.error_kind == "binary_missing":
-                status = 503
-            raise HTTPException(
-                status_code=status,
-                detail={
-                    "error": result.error_kind or "error",
-                    "message": result.error,
-                    "output": result.output,
-                    "unknowns": result.unknowns or [],
-                },
-            )
+    return summary.as_dict()
 
-        source_text = source_bytes.decode("utf-8", errors="replace")
-        target_text = target_bytes.decode("utf-8", errors="replace")
-        report = enrich_entries_with_snippets(result.report or {}, source_text, target_text)
-        report = enrich_entries_with_display(report)
-        report["files"] = {
-            "source": {"name": source_name, "text": source_text},
-            "target": {"name": target_name, "text": target_text},
-        }
-        return report
+
+@app.post("/api/jobs")
+async def create_job(
+    source: UploadFile = File(...),
+    target: UploadFile = File(...),
+    source_vendor: str = Form("auto"),
+    target_vendor: str = Form("auto"),
+    mapping_yaml: str = Form(""),
+    ignore_unmapped: str = Form("true"),
+    ignore_subnet_mask: str = Form("true"),
+) -> dict:
+    return await _create_job_response(
+        source,
+        target,
+        source_vendor,
+        target_vendor,
+        mapping_yaml,
+        ignore_unmapped,
+        ignore_subnet_mask,
+    )
+
+
+@app.post("/api/diff")
+async def diff_configs(
+    source: UploadFile = File(...),
+    target: UploadFile = File(...),
+    source_vendor: str = Form("auto"),
+    target_vendor: str = Form("auto"),
+    mapping_yaml: str = Form(""),
+    ignore_unmapped: str = Form("true"),
+    ignore_subnet_mask: str = Form("true"),
+) -> dict:
+    """Alias of POST /api/jobs — returns a job summary, not full file bodies."""
+    return await _create_job_response(
+        source,
+        target,
+        source_vendor,
+        target_vendor,
+        mapping_yaml,
+        ignore_unmapped,
+        ignore_subnet_mask,
+    )
+
+
+@app.get("/api/jobs/{job_id}")
+def job_meta(job_id: str) -> dict:
+    try:
+        return get_job_summary(job_id)
+    except JobError as exc:
+        _raise_job_error(exc)
+
+
+@app.get("/api/jobs/{job_id}/entries")
+def job_entries(
+    job_id: str,
+    category: str = "all",
+    offset: int = 0,
+    limit: int = 100,
+) -> dict:
+    try:
+        return list_entries(job_id, category=category, offset=offset, limit=limit)
+    except JobError as exc:
+        _raise_job_error(exc)
+
+
+@app.get("/api/jobs/{job_id}/entries/{index}")
+def job_entry(job_id: str, index: int) -> dict:
+    try:
+        return get_entry(job_id, index)
+    except JobError as exc:
+        _raise_job_error(exc)
+
+
+@app.get("/api/jobs/{job_id}/files/{side}/lines")
+def job_file_lines(job_id: str, side: str, start: int = 1, end: int = 100) -> dict:
+    try:
+        return read_lines(job_id, side, start, end)
+    except JobError as exc:
+        _raise_job_error(exc)
 
 
 @app.get("/")

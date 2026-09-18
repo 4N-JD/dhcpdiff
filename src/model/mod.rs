@@ -12,7 +12,7 @@ pub use config::{
 pub use filter::FilterMatch;
 pub use option::{
     BoundOption, OptionDef, OptionDefMap, OptionKey, OptionMap, BOOTP_FILENAME, BOOTP_NEXT_SERVER,
-    BOOTP_SERVER_NAME,
+    BOOTP_SERVER_NAME, ISC_DEFAULT_LEASE_TIME, ISC_MAX_LEASE_TIME, ISC_MIN_LEASE_TIME,
 };
 pub use scenario::ClientScenario;
 pub use source::{LocationRef, SideLocations, SourceRef};

@@ -641,10 +641,15 @@ fn pxeclient_substring_global_if_applies_dhcp_options() {
         with_pxe.keys().collect::<Vec<_>>()
     );
     assert_eq!(
-        with_pxe.get(&OptionKey::dhcp(51)).map(|b| &b.value),
+        with_pxe.get(&OptionKey::isc_default_lease_time()).map(|b| &b.value),
         Some(&dhcpdiff::model::NormalizedValue::Int(30)),
-        "PXEClient scenario should apply default-lease-time 30: {:?}",
-        with_pxe.get(&OptionKey::dhcp(51))
+        "PXEClient scenario should apply default-lease-time 30 as isc:0: {:?}",
+        with_pxe.get(&OptionKey::isc_default_lease_time())
+    );
+    assert!(
+        !with_pxe.contains_key(&OptionKey::dhcp(51)),
+        "default-lease-time must not become dhcp:51: {:?}",
+        with_pxe.keys().collect::<Vec<_>>()
     );
 }
 
@@ -689,7 +694,7 @@ fn scenario_diff_only_reports_scenario_delta_options() {
                 if entity.kind == "option"
                     && entity.key.starts_with("reservation:10.0.0.15:")
                     && !entity.key.contains(":vci=")
-                    && entity.key.contains("dhcp:51") =>
+                    && entity.key.contains("isc:0") =>
             {
                 true
             }
@@ -712,7 +717,7 @@ fn scenario_diff_only_reports_scenario_delta_options() {
             | DiffEntry::ExtraInTarget { entity, .. }
                 if entity.kind == "option"
                     && entity.key.contains("vci=OptiIpPhone")
-                    && entity.key.contains("dhcp:51") =>
+                    && entity.key.contains("isc:0") =>
             {
                 true
             }
@@ -741,6 +746,37 @@ fn scenario_diff_only_reports_scenario_delta_options() {
         !vci_vendor.is_empty(),
         "VCI scenario should still report vendor-option deltas: {:?}",
         report.entries
+    );
+}
+
+#[test]
+fn isc_lease_time_statements_are_distinct_keys() {
+    let config = load("infoblox", fixture("isc_lease_times.conf"));
+    assert_eq!(
+        config
+            .global_options
+            .get(&OptionKey::isc_default_lease_time())
+            .map(|b| &b.value),
+        Some(&dhcpdiff::model::NormalizedValue::Int(3600))
+    );
+    assert_eq!(
+        config
+            .global_options
+            .get(&OptionKey::isc_min_lease_time())
+            .map(|b| &b.value),
+        Some(&dhcpdiff::model::NormalizedValue::Int(600))
+    );
+    assert_eq!(
+        config
+            .global_options
+            .get(&OptionKey::isc_max_lease_time())
+            .map(|b| &b.value),
+        Some(&dhcpdiff::model::NormalizedValue::Int(7200))
+    );
+    assert!(
+        !config.global_options.contains_key(&OptionKey::dhcp(51)),
+        "lease-time statements must not collapse into dhcp:51: {:?}",
+        config.global_options.keys().collect::<Vec<_>>()
     );
 }
 

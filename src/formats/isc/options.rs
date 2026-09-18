@@ -67,12 +67,21 @@ pub fn insert_statement_options_labeled(
     }
 }
 
-/// Parse ISC lease-time statements. Only `default-lease-time` maps to client option 51.
+/// Parse ISC lease-time server statements into the synthetic `isc` space.
+/// Never mapped to DHCP option 51 (`option dhcp-lease-time`).
 pub fn parse_lease_time_statement(text: &str) -> Option<(OptionKey, NormalizedValue)> {
     let trimmed = text.trim().trim_end_matches(';');
-    let value = trimmed.strip_prefix("default-lease-time ")?.trim();
-    let n: i64 = value.parse().ok()?;
-    Some((OptionKey::dhcp(51), NormalizedValue::Int(n)))
+    let (key, value) = if let Some(v) = trimmed.strip_prefix("default-lease-time ") {
+        (OptionKey::isc_default_lease_time(), v)
+    } else if let Some(v) = trimmed.strip_prefix("min-lease-time ") {
+        (OptionKey::isc_min_lease_time(), v)
+    } else if let Some(v) = trimmed.strip_prefix("max-lease-time ") {
+        (OptionKey::isc_max_lease_time(), v)
+    } else {
+        return None;
+    };
+    let n: i64 = value.trim().parse().ok()?;
+    Some((key, NormalizedValue::Int(n)))
 }
 
 pub fn parse_option_statement(text: &str) -> Option<(String, String)> {

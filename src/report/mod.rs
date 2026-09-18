@@ -12,7 +12,7 @@ pub fn print_report(report: &DiffReport, format: OutputFormat) -> anyhow::Result
     match format {
         OutputFormat::Text => print_text(report),
         OutputFormat::Json => {
-            println!("{}", serde_json::to_string_pretty(report)?);
+            println!("{}", serde_json::to_string(report)?);
         }
     }
     Ok(())

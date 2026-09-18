@@ -1,0 +1,13 @@
+services:
+  web:
+    build: .
+    image: dhcpdiff-web
+    ports:
+      - "8080:8080"
+    environment:
+      DHCPDIFF_BIN: /usr/local/bin/dhcpdiff
+      DHCPDIFF_DEFAULT_MAPPING: /app/mappings/user.yaml
+      DHCPDIFF_JOB_DIR: /tmp/dhcpdiff-jobs
+
+    restart: unless-stopped
+

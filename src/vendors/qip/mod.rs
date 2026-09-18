@@ -6,11 +6,11 @@ use ipnet::Ipv4Net;
 
 use crate::formats::isc::{
     collect_definitions, collect_options_from_nodes_labeled, option_key_from_name,
-    parse_option_statement, IscDocument, IscNode,
+    parse_lease_time_statement, parse_option_statement, IscDocument, IscNode,
 };
 use crate::model::{
-    normalize_mac, BoundOption, Config, Filter, FilterMatch, NormalizedValue, OptionKey, Pool,
-    Reservation, SourceRef, Subnet,
+    normalize_mac, BoundOption, Config, Filter, FilterMatch, NormalizedValue, Pool, Reservation,
+    SourceRef, Subnet,
 };
 use crate::registry::{
     DetectionScore, FormatFamily, Input, VendorDocument, VendorPlugin,
@@ -92,19 +92,11 @@ fn apply_global_statement(config: &mut Config, text: &str, file: &str, line: u32
             key,
             BoundOption::new(val, source.clone()).with_declared_in("Global"),
         );
-    } else if text.trim().starts_with("default-lease-time ")
-        || text.trim().starts_with("max-lease-time ")
-        || text.trim().starts_with("min-lease-time ")
-    {
-        let parts: Vec<_> = text.split_whitespace().collect();
-        if parts.len() >= 2 {
-            if let Ok(n) = parts[1].trim_end_matches(';').parse::<i64>() {
-                config.global_options.insert(
-                    OptionKey::dhcp(51),
-                    BoundOption::new(NormalizedValue::Int(n), source).with_declared_in("Global"),
-                );
-            }
-        }
+    } else if let Some((key, val)) = parse_lease_time_statement(text) {
+        config.global_options.insert(
+            key,
+            BoundOption::new(val, source).with_declared_in("Global"),
+        );
     }
 }
 

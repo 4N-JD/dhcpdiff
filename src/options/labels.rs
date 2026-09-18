@@ -2,6 +2,7 @@ use std::collections::BTreeMap;
 
 use crate::model::{
     Config, OptionKey, BOOTP_FILENAME, BOOTP_NEXT_SERVER, BOOTP_SERVER_NAME,
+    ISC_DEFAULT_LEASE_TIME, ISC_MAX_LEASE_TIME, ISC_MIN_LEASE_TIME,
 };
 
 use super::builtin::load_builtin_dhcp_names_by_code;
@@ -25,6 +26,18 @@ impl OptionLabeler {
         names.insert(
             ("bootp".to_string(), BOOTP_SERVER_NAME),
             "server-name".to_string(),
+        );
+        names.insert(
+            ("isc".to_string(), ISC_DEFAULT_LEASE_TIME),
+            "default-lease-time".to_string(),
+        );
+        names.insert(
+            ("isc".to_string(), ISC_MIN_LEASE_TIME),
+            "min-lease-time".to_string(),
+        );
+        names.insert(
+            ("isc".to_string(), ISC_MAX_LEASE_TIME),
+            "max-lease-time".to_string(),
         );
         for defs in [&source.option_definitions, &target.option_definitions] {
             for def in defs.values() {

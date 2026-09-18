@@ -11,8 +11,8 @@ use crate::formats::isc::{
     IscBlock, IscNode,
 };
 use crate::model::{
-    BoundOption, ConditionalRule, Filter, FilterMatch, NormalizedValue, OptionDef, OptionKey,
-    OptionMap, Pool, Reservation, RuleScope, SharedNetwork, SourceRef, Subnet,
+    ConditionalRule, Filter, FilterMatch, OptionDef, OptionMap, Pool, Reservation, RuleScope,
+    SharedNetwork, SourceRef, Subnet,
 };
 
 static VCI_SUBSTRING: LazyLock<Regex> = LazyLock::new(|| {
@@ -39,23 +39,9 @@ pub fn apply_global_statement(
         global_options,
         definitions,
         text,
-        source.clone(),
+        source,
         Some("Global"),
     );
-    if text.starts_with("default-lease-time ")
-        || text.starts_with("min-lease-time ")
-        || text.starts_with("max-lease-time ")
-    {
-        let parts: Vec<_> = text.split_whitespace().collect();
-        if let Some(v) = parts.get(1) {
-            if let Ok(n) = v.trim_end_matches(';').parse::<i64>() {
-                global_options.insert(
-                    OptionKey::dhcp(51),
-                    BoundOption::new(NormalizedValue::Int(n), source).with_declared_in("Global"),
-                );
-            }
-        }
-    }
 }
 
 fn if_declared_in_label(scope: &RuleScope, match_expr: &FilterMatch) -> String {

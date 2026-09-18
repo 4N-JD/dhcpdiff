@@ -151,7 +151,7 @@ impl ScenarioOverlay {
                     allowed_spaces.insert(space.clone());
                 }
                 for (k, v) in &filter.options {
-                    if k.space != "dhcp" && !k.is_bootp() && !k.is_unresolved() {
+                    if k.space != "dhcp" && !k.is_bootp() && !k.is_isc() && !k.is_unresolved() {
                         allowed_spaces.insert(k.space.clone());
                     }
                     options.insert(k.clone(), v.clone());
@@ -173,7 +173,7 @@ impl ScenarioOverlay {
                 allowed_spaces.insert(space.clone());
             }
             for (k, v) in &rule.options {
-                if k.space != "dhcp" && !k.is_bootp() && !k.is_unresolved() {
+                if k.space != "dhcp" && !k.is_bootp() && !k.is_isc() && !k.is_unresolved() {
                     allowed_spaces.insert(k.space.clone());
                 }
                 options.insert(k.clone(), v.clone());
@@ -236,6 +236,7 @@ fn gate_vendor_options(map: OptionMap, allowed_spaces: &BTreeSet<String>) -> Opt
         .filter(|(k, _)| {
             k.space == "dhcp"
                 || k.is_bootp()
+                || k.is_isc()
                 || k.is_unresolved()
                 || allowed_spaces.contains(&k.space)
         })

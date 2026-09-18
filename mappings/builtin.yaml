@@ -25,7 +25,6 @@ options:
     code: 46
   - name: dhcp-lease-time
     code: 51
-    aliases: [default-lease-time]
   - name: dhcp-message-type
     code: 53
   - name: dhcp-server-identifier
