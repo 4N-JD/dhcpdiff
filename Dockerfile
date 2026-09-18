@@ -1,13 +1,13 @@
 # syntax=docker/dockerfile:1
 
-FROM rust:1-bookworm AS rust-build
+FROM rust:1-slim-trixie AS rust-build
 WORKDIR /src
 COPY Cargo.toml Cargo.lock ./
 COPY src ./src
 COPY mappings ./mappings
 RUN cargo build --release
 
-FROM python:3.12-slim-bookworm
+FROM python:3.14-slim-trixie
 WORKDIR /app
 
 RUN apt-get update \
