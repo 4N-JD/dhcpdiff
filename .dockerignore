@@ -1,0 +1,16 @@
+target/
+target-user/
+.git/
+mockups/
+*.log
+dhcpdiff.out
+__pycache__/
+*.pyc
+.venv/
+web/.venv/
+nssds_sc_15_16.*.conf
+example_*.dhcpd.conf
+example_*.conf
+test-ibx.conf
+test-qip.conf
+*.dhcpd.conf

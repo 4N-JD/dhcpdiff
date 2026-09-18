@@ -1,0 +1,404 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>D — Table + drawer · dhcpdiff mockup</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg: #eef0ea;
+      --surface: #ffffff;
+      --ink: #1a1d18;
+      --muted: #5c6358;
+      --border: #cfd4c8;
+      --accent: #2f5d3a;
+      --missing: #b42318;
+      --missing-bg: #fef3f2;
+      --extra: #175cd3;
+      --extra-bg: #eff8ff;
+      --changed: #b54708;
+      --changed-bg: #fffaeb;
+      --unmapped: #667085;
+      --unmapped-bg: #f2f4f7;
+      --code-bg: #f7f8f4;
+      --hl: #fff7d6;
+      --drawer-w: min(520px, 100vw);
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
+      color: var(--ink);
+      background: var(--bg);
+    }
+    header.app {
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+      padding: 0.65rem 1rem;
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      position: sticky;
+      top: 0;
+      z-index: 5;
+    }
+    header.app a.back { font-size: 0.8rem; color: var(--muted); text-decoration: none; }
+    header.app a.back:hover { color: var(--accent); }
+    header.app h1 {
+      font-family: "IBM Plex Mono", ui-monospace, monospace;
+      font-size: 0.95rem;
+      font-weight: 600;
+      margin: 0;
+    }
+    header.app .meta { margin-left: auto; font-size: 0.8rem; color: var(--muted); }
+    .toolbar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.4rem;
+      padding: 0.6rem 1rem;
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      position: sticky;
+      top: 45px;
+      z-index: 4;
+    }
+    .chip {
+      font-family: "IBM Plex Mono", ui-monospace, monospace;
+      font-size: 0.72rem;
+      font-weight: 600;
+      padding: 0.28rem 0.55rem;
+      border-radius: 999px;
+      border: 1px solid var(--border);
+      background: #fff;
+      color: var(--muted);
+      cursor: pointer;
+    }
+    .chip.active { border-color: var(--accent); color: var(--accent); background: #eef5ef; }
+    .chip .n { opacity: 0.75; margin-left: 0.25rem; }
+    .badge {
+      font-family: "IBM Plex Mono", ui-monospace, monospace;
+      font-size: 0.65rem;
+      font-weight: 600;
+      padding: 0.12rem 0.35rem;
+      border-radius: 3px;
+      white-space: nowrap;
+    }
+    .badge.missing { background: var(--missing-bg); color: var(--missing); }
+    .badge.extra { background: var(--extra-bg); color: var(--extra); }
+    .badge.changed { background: var(--changed-bg); color: var(--changed); }
+    .badge.unmapped { background: var(--unmapped-bg); color: var(--unmapped); }
+    main { padding: 1rem; max-width: 1200px; margin: 0 auto; }
+    .table-wrap {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      overflow: auto;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.85rem;
+    }
+    th {
+      text-align: left;
+      font-size: 0.7rem;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      color: var(--muted);
+      font-weight: 600;
+      padding: 0.65rem 0.75rem;
+      border-bottom: 1px solid var(--border);
+      background: #f7f8f4;
+      position: sticky;
+      top: 0;
+    }
+    td {
+      padding: 0.65rem 0.75rem;
+      border-bottom: 1px solid var(--border);
+      vertical-align: top;
+    }
+    tr { cursor: pointer; }
+    tr:hover td { background: #f7f8f4; }
+    tr.selected td { background: #eef5ef; }
+    tr:last-child td { border-bottom: none; }
+    .mono {
+      font-family: "IBM Plex Mono", ui-monospace, monospace;
+      font-size: 0.75rem;
+      word-break: break-all;
+    }
+    .kind-cell { color: var(--muted); font-size: 0.8rem; }
+    .vals {
+      font-family: "IBM Plex Mono", ui-monospace, monospace;
+      font-size: 0.72rem;
+      line-height: 1.4;
+    }
+    .vals .from { color: var(--missing); }
+    .vals .to { color: var(--extra); }
+    .vals .sep { color: var(--muted); margin: 0 0.25rem; }
+    .hint {
+      margin-top: 0.75rem;
+      font-size: 0.8rem;
+      color: var(--muted);
+    }
+    .backdrop {
+      position: fixed;
+      inset: 0;
+      background: rgba(26, 29, 24, 0.28);
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 160ms ease;
+      z-index: 20;
+    }
+    .backdrop.open {
+      opacity: 1;
+      pointer-events: auto;
+    }
+    .drawer {
+      position: fixed;
+      top: 0;
+      right: 0;
+      width: var(--drawer-w);
+      height: 100vh;
+      background: var(--surface);
+      border-left: 1px solid var(--border);
+      z-index: 21;
+      transform: translateX(100%);
+      transition: transform 180ms ease;
+      display: flex;
+      flex-direction: column;
+      box-shadow: -8px 0 24px rgba(0, 0, 0, 0.08);
+    }
+    .drawer.open { transform: translateX(0); }
+    .drawer-head {
+      display: flex;
+      align-items: flex-start;
+      gap: 0.75rem;
+      padding: 1rem;
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+    .drawer-head h2 {
+      font-family: "IBM Plex Mono", ui-monospace, monospace;
+      font-size: 0.82rem;
+      font-weight: 600;
+      margin: 0.35rem 0 0;
+      word-break: break-all;
+      flex: 1;
+    }
+    .drawer-close {
+      border: 1px solid var(--border);
+      background: #fff;
+      border-radius: 4px;
+      padding: 0.25rem 0.5rem;
+      cursor: pointer;
+      font-size: 0.8rem;
+      color: var(--muted);
+    }
+    .drawer-close:hover { color: var(--ink); }
+    .drawer-body {
+      padding: 1rem;
+      overflow: auto;
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      gap: 0.75rem;
+    }
+    .detail-desc { margin: 0; font-size: 0.9rem; color: var(--muted); }
+    .values {
+      display: flex;
+      gap: 0.5rem;
+      flex-wrap: wrap;
+      font-family: "IBM Plex Mono", ui-monospace, monospace;
+      font-size: 0.78rem;
+    }
+    .values span {
+      background: var(--code-bg);
+      border: 1px solid var(--border);
+      padding: 0.3rem 0.5rem;
+      border-radius: 4px;
+    }
+    .values .arrow { background: none; border: none; color: var(--muted); }
+    .dual {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 0.65rem;
+    }
+    .code-panel {
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      overflow: hidden;
+    }
+    .code-panel header {
+      display: flex;
+      justify-content: space-between;
+      padding: 0.4rem 0.65rem;
+      border-bottom: 1px solid var(--border);
+      background: var(--code-bg);
+      font-size: 0.72rem;
+      font-weight: 600;
+    }
+    .code-panel header .side { color: var(--accent); }
+    .code-panel pre {
+      margin: 0;
+      padding: 0.65rem;
+      overflow: auto;
+      font-family: "IBM Plex Mono", ui-monospace, monospace;
+      font-size: 0.7rem;
+      line-height: 1.45;
+      white-space: pre;
+      max-height: 280px;
+    }
+    .code-panel pre .hl { background: var(--hl); }
+    .code-panel.absent { opacity: 0.55; }
+    .code-panel.absent pre { color: var(--muted); font-style: italic; }
+  </style>
+</head>
+<body>
+  <header class="app">
+    <a class="back" href="index.html">← Gallery</a>
+    <h1>D · Table + drawer</h1>
+    <span class="meta">Click a row for description and side-by-side blocks</span>
+  </header>
+  <div class="toolbar" id="toolbar"></div>
+  <main>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Category</th>
+            <th>Kind</th>
+            <th>Entity</th>
+            <th>Field / values</th>
+          </tr>
+        </thead>
+        <tbody id="tbody"></tbody>
+      </table>
+    </div>
+    <p class="hint">Tip: CHANGED rows show source → target inline; open the drawer for config blocks.</p>
+  </main>
+  <div class="backdrop" id="backdrop"></div>
+  <aside class="drawer" id="drawer" aria-hidden="true">
+    <div class="drawer-head">
+      <div style="flex:1">
+        <span class="badge" id="dBadge"></span>
+        <h2 id="dKey"></h2>
+      </div>
+      <button type="button" class="drawer-close" id="closeBtn">Close</button>
+    </div>
+    <div class="drawer-body" id="dBody"></div>
+  </aside>
+  <script src="sample-data.js"></script>
+  <script>
+    const state = { filter: "all", selected: null };
+
+    function filtered() {
+      if (state.filter === "all") return SAMPLE_DIFFS;
+      return SAMPLE_DIFFS.filter((d) => d.category === state.filter);
+    }
+
+    function escapeHtml(s) {
+      return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+    }
+
+    function formatBlock(text, hlLines) {
+      const set = new Set(hlLines || []);
+      return text.split("\n").map((line, i) => {
+        const body = escapeHtml(line) || " ";
+        return set.has(i + 1) ? `<span class="hl">${body}</span>\n` : `${body}\n`;
+      }).join("").replace(/\n$/, "");
+    }
+
+    function valueCell(d) {
+      if (d.sourceValue != null) {
+        return `<div class="vals"><span class="from">${escapeHtml(d.sourceValue)}</span><span class="sep">→</span><span class="to">${escapeHtml(d.targetValue)}</span></div>`;
+      }
+      if (d.category === "missing") return `<span class="vals">present in source only</span>`;
+      if (d.category === "extra") return `<span class="vals">present in target only</span>`;
+      return `<span class="vals">${escapeHtml(d.detail.slice(0, 60))}…</span>`;
+    }
+
+    function openDrawer(id) {
+      state.selected = id;
+      const d = SAMPLE_DIFFS.find((x) => x.id === id);
+      if (!d) return;
+      const badge = document.getElementById("dBadge");
+      badge.className = `badge ${d.category}`;
+      badge.textContent = d.categoryLabel;
+      document.getElementById("dKey").textContent = d.entityKey;
+      const values = d.sourceValue != null
+        ? `<div class="values"><span>source: ${escapeHtml(d.sourceValue)}</span><span class="arrow">→</span><span>target: ${escapeHtml(d.targetValue)}</span></div>`
+        : "";
+      document.getElementById("dBody").innerHTML = `
+        <p class="detail-desc">${escapeHtml(d.detail)}</p>
+        ${values}
+        <div class="dual">
+          <div class="code-panel ${d.sourceBlock ? "" : "absent"}">
+            <header><span class="side">Source</span><span>${escapeHtml(d.sourceFile)}</span></header>
+            <pre>${d.sourceBlock ? formatBlock(d.sourceBlock, d.highlightLines?.source) : "(not present in source)"}</pre>
+          </div>
+          <div class="code-panel ${d.targetBlock ? "" : "absent"}">
+            <header><span class="side">Target</span><span>${escapeHtml(d.targetFile)}</span></header>
+            <pre>${d.targetBlock ? formatBlock(d.targetBlock, d.highlightLines?.target) : "(not present in target)"}</pre>
+          </div>
+        </div>
+      `;
+      document.getElementById("drawer").classList.add("open");
+      document.getElementById("drawer").setAttribute("aria-hidden", "false");
+      document.getElementById("backdrop").classList.add("open");
+      renderTable();
+    }
+
+    function closeDrawer() {
+      state.selected = null;
+      document.getElementById("drawer").classList.remove("open");
+      document.getElementById("drawer").setAttribute("aria-hidden", "true");
+      document.getElementById("backdrop").classList.remove("open");
+      renderTable();
+    }
+
+    function renderTable() {
+      document.getElementById("tbody").innerHTML = filtered().map((d) => `
+        <tr class="${d.id === state.selected ? "selected" : ""}" data-id="${d.id}">
+          <td><span class="badge ${d.category}">${d.categoryLabel}</span></td>
+          <td class="kind-cell">${d.kind}</td>
+          <td class="mono">${escapeHtml(d.entityKey)}</td>
+          <td>${valueCell(d)}</td>
+        </tr>
+      `).join("");
+      document.querySelectorAll("tbody tr").forEach((tr) => {
+        tr.addEventListener("click", () => openDrawer(Number(tr.dataset.id)));
+      });
+    }
+
+    function render() {
+      const counts = SAMPLE_COUNTS;
+      const cats = [
+        ["all", "All", counts.all],
+        ["missing", "Missing", counts.missing],
+        ["extra", "Extra", counts.extra],
+        ["changed", "Changed", counts.changed],
+        ["unmapped", "Unmapped", counts.unmapped],
+      ];
+      document.getElementById("toolbar").innerHTML = cats.map(([id, label, n]) =>
+        `<button type="button" class="chip ${state.filter === id ? "active" : ""}" data-f="${id}">${label}<span class="n">${n}</span></button>`
+      ).join("");
+      document.querySelectorAll(".chip").forEach((b) => {
+        b.addEventListener("click", () => { state.filter = b.dataset.f; render(); });
+      });
+      renderTable();
+    }
+
+    document.getElementById("closeBtn").addEventListener("click", closeDrawer);
+    document.getElementById("backdrop").addEventListener("click", closeDrawer);
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") closeDrawer();
+    });
+
+    render();
+  </script>
+</body>
+</html>

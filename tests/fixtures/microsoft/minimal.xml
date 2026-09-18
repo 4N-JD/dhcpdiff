@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<DHCPServer>
+  <DHCPv4Scope>
+    <ScopeId>10.10.10.0</ScopeId>
+    <SubnetMask>255.255.255.0</SubnetMask>
+    <StartRange>10.10.10.100</StartRange>
+    <EndRange>10.10.10.200</EndRange>
+    <OptionId>6</OptionId>
+    <Value>10.0.0.1</Value>
+    <Reservation>
+      <IPAddress>10.10.10.50</IPAddress>
+      <ClientId>aa-bb-cc-dd-ee-ff</ClientId>
+    </Reservation>
+  </DHCPv4Scope>
+</DHCPServer>

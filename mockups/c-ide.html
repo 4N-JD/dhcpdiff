@@ -1,0 +1,300 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>C — Three-pane IDE · dhcpdiff mockup</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg: #e8ebe3;
+      --surface: #ffffff;
+      --ink: #1a1d18;
+      --muted: #5c6358;
+      --border: #c5cbbd;
+      --accent: #2f5d3a;
+      --missing: #b42318;
+      --missing-bg: #fef3f2;
+      --extra: #175cd3;
+      --extra-bg: #eff8ff;
+      --changed: #b54708;
+      --changed-bg: #fffaeb;
+      --unmapped: #667085;
+      --unmapped-bg: #f2f4f7;
+      --code-bg: #f4f6f0;
+      --hl: #fff3bf;
+      --hl-border: #f5d565;
+      --gutter: #8a9182;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
+      color: var(--ink);
+      background: var(--bg);
+    }
+    header.app {
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+      padding: 0.55rem 0.9rem;
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+    header.app a.back { font-size: 0.8rem; color: var(--muted); text-decoration: none; }
+    header.app a.back:hover { color: var(--accent); }
+    header.app h1 {
+      font-family: "IBM Plex Mono", ui-monospace, monospace;
+      font-size: 0.95rem;
+      font-weight: 600;
+      margin: 0;
+    }
+    header.app .meta { margin-left: auto; font-size: 0.8rem; color: var(--muted); }
+    .toolbar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.4rem;
+      padding: 0.5rem 0.9rem;
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+    .chip {
+      font-family: "IBM Plex Mono", ui-monospace, monospace;
+      font-size: 0.7rem;
+      font-weight: 600;
+      padding: 0.25rem 0.5rem;
+      border-radius: 999px;
+      border: 1px solid var(--border);
+      background: #fff;
+      color: var(--muted);
+      cursor: pointer;
+    }
+    .chip.active { border-color: var(--accent); color: var(--accent); background: #eef5ef; }
+    .chip .n { opacity: 0.75; margin-left: 0.2rem; }
+    .badge {
+      font-family: "IBM Plex Mono", ui-monospace, monospace;
+      font-size: 0.62rem;
+      font-weight: 600;
+      padding: 0.1rem 0.3rem;
+      border-radius: 3px;
+    }
+    .badge.missing { background: var(--missing-bg); color: var(--missing); }
+    .badge.extra { background: var(--extra-bg); color: var(--extra); }
+    .badge.changed { background: var(--changed-bg); color: var(--changed); }
+    .badge.unmapped { background: var(--unmapped-bg); color: var(--unmapped); }
+    .desc-bar {
+      padding: 0.55rem 0.9rem;
+      background: #fbfcf8;
+      border-bottom: 1px solid var(--border);
+      font-size: 0.85rem;
+      color: var(--muted);
+      flex-shrink: 0;
+      min-height: 2.4rem;
+    }
+    .desc-bar strong {
+      color: var(--ink);
+      font-weight: 600;
+      font-family: "IBM Plex Mono", ui-monospace, monospace;
+      font-size: 0.78rem;
+    }
+    .workspace {
+      flex: 1;
+      display: grid;
+      grid-template-columns: minmax(220px, 26%) 1fr 1fr;
+      min-height: 0;
+    }
+    @media (max-width: 1000px) {
+      .workspace { grid-template-columns: 1fr; grid-template-rows: 180px 1fr 1fr; }
+    }
+    .list-pane {
+      border-right: 1px solid var(--border);
+      background: var(--surface);
+      overflow: auto;
+    }
+    .list-item {
+      padding: 0.55rem 0.7rem;
+      border-bottom: 1px solid var(--border);
+      cursor: pointer;
+    }
+    .list-item:hover { background: #f7f8f4; }
+    .list-item.selected {
+      background: #eef5ef;
+      box-shadow: inset 3px 0 0 var(--accent);
+    }
+    .list-item .key {
+      font-family: "IBM Plex Mono", ui-monospace, monospace;
+      font-size: 0.68rem;
+      word-break: break-all;
+      margin-top: 0.25rem;
+    }
+    .file-pane {
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
+      border-right: 1px solid var(--border);
+      background: var(--surface);
+    }
+    .file-pane:last-child { border-right: none; }
+    .file-pane header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 0.4rem 0.65rem;
+      border-bottom: 1px solid var(--border);
+      background: var(--code-bg);
+      font-size: 0.72rem;
+      font-weight: 600;
+      flex-shrink: 0;
+    }
+    .file-pane header .side { color: var(--accent); }
+    .file-scroll {
+      overflow: auto;
+      flex: 1;
+      font-family: "IBM Plex Mono", ui-monospace, monospace;
+      font-size: 0.7rem;
+      line-height: 1.45;
+    }
+    .line {
+      display: grid;
+      grid-template-columns: 2.6rem 1fr;
+      padding: 0 0.5rem 0 0;
+    }
+    .line .num {
+      color: var(--gutter);
+      text-align: right;
+      padding-right: 0.55rem;
+      user-select: none;
+      border-right: 1px solid var(--border);
+    }
+    .line .code {
+      padding-left: 0.55rem;
+      white-space: pre;
+    }
+    .line.hl {
+      background: var(--hl);
+    }
+    .line.hl .num {
+      border-left: 3px solid var(--hl-border);
+      padding-left: 0;
+    }
+    .line.dim { opacity: 0.35; }
+  </style>
+</head>
+<body>
+  <header class="app">
+    <a class="back" href="index.html">← Gallery</a>
+    <h1>C · Three-pane IDE</h1>
+    <span class="meta">Select a diff to highlight matching blocks in both files</span>
+  </header>
+  <div class="toolbar" id="toolbar"></div>
+  <div class="desc-bar" id="desc">Loading…</div>
+  <div class="workspace">
+    <div class="list-pane" id="list"></div>
+    <div class="file-pane">
+      <header><span class="side">Source</span><span>nssds_sc_15_16.bcn.conf</span></header>
+      <div class="file-scroll" id="sourceFile"></div>
+    </div>
+    <div class="file-pane">
+      <header><span class="side">Target</span><span>nssds_sc_15_16.ibx.conf</span></header>
+      <div class="file-scroll" id="targetFile"></div>
+    </div>
+  </div>
+  <script src="sample-data.js"></script>
+  <script>
+    const state = { filter: "all", selected: 2 };
+
+    function filtered() {
+      if (state.filter === "all") return SAMPLE_DIFFS;
+      return SAMPLE_DIFFS.filter((d) => d.category === state.filter);
+    }
+
+    function escapeHtml(s) {
+      return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+    }
+
+    function inRange(n, range) {
+      if (!range) return false;
+      return n >= range[0] && n <= range[1];
+    }
+
+    function renderFile(el, text, range, scrollTo) {
+      const lines = text.replace(/\n$/, "").split("\n");
+      const hasHl = !!range;
+      el.innerHTML = lines.map((line, i) => {
+        const n = i + 1;
+        const hl = inRange(n, range);
+        const dim = hasHl && !hl;
+        return `<div class="line ${hl ? "hl" : ""} ${dim ? "dim" : ""}" data-line="${n}"><span class="num">${n}</span><span class="code">${escapeHtml(line) || " "}</span></div>`;
+      }).join("");
+      if (scrollTo && range) {
+        const target = el.querySelector(`[data-line="${range[0]}"]`);
+        if (target) target.scrollIntoView({ block: "center", behavior: "smooth" });
+      }
+    }
+
+    function render() {
+      const counts = SAMPLE_COUNTS;
+      const cats = [
+        ["all", "All", counts.all],
+        ["missing", "Missing", counts.missing],
+        ["extra", "Extra", counts.extra],
+        ["changed", "Changed", counts.changed],
+        ["unmapped", "Unmapped", counts.unmapped],
+      ];
+      document.getElementById("toolbar").innerHTML = cats.map(([id, label, n]) =>
+        `<button type="button" class="chip ${state.filter === id ? "active" : ""}" data-f="${id}">${label}<span class="n">${n}</span></button>`
+      ).join("");
+      document.querySelectorAll(".chip").forEach((b) => {
+        b.addEventListener("click", () => {
+          state.filter = b.dataset.f;
+          const visible = filtered();
+          if (!visible.find((d) => d.id === state.selected)) {
+            state.selected = visible[0]?.id ?? null;
+          }
+          render();
+        });
+      });
+
+      document.getElementById("list").innerHTML = filtered().map((d) => `
+        <div class="list-item ${d.id === state.selected ? "selected" : ""}" data-id="${d.id}">
+          <span class="badge ${d.category}">${d.categoryLabel}</span>
+          <div class="key">${escapeHtml(d.entityKey)}</div>
+        </div>
+      `).join("");
+      document.querySelectorAll(".list-item").forEach((el) => {
+        el.addEventListener("click", () => {
+          state.selected = Number(el.dataset.id);
+          render(true);
+        });
+      });
+
+      const d = SAMPLE_DIFFS.find((x) => x.id === state.selected);
+      const desc = document.getElementById("desc");
+      if (!d) {
+        desc.textContent = "No differences in this filter";
+        renderFile(document.getElementById("sourceFile"), SAMPLE_SOURCE_FILE, null, false);
+        renderFile(document.getElementById("targetFile"), SAMPLE_TARGET_FILE, null, false);
+        return;
+      }
+      const values = d.sourceValue != null
+        ? ` · <code>${escapeHtml(d.sourceValue)}</code> → <code>${escapeHtml(d.targetValue)}</code>`
+        : "";
+      desc.innerHTML = `<strong>${d.categoryLabel}</strong> — ${escapeHtml(d.detail)}${values}`;
+
+      const hl = SAMPLE_FILE_HIGHLIGHTS[d.id] || {};
+      const scroll = arguments[0] === true || arguments[0] === undefined;
+      renderFile(document.getElementById("sourceFile"), SAMPLE_SOURCE_FILE, hl.source, scroll);
+      renderFile(document.getElementById("targetFile"), SAMPLE_TARGET_FILE, hl.target, scroll);
+    }
+
+    render(true);
+  </script>
+</body>
+</html>

@@ -1,0 +1,352 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>A — Master–detail · dhcpdiff mockup</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg: #eef0ea;
+      --surface: #ffffff;
+      --ink: #1a1d18;
+      --muted: #5c6358;
+      --border: #cfd4c8;
+      --accent: #2f5d3a;
+      --missing: #b42318;
+      --missing-bg: #fef3f2;
+      --extra: #175cd3;
+      --extra-bg: #eff8ff;
+      --changed: #b54708;
+      --changed-bg: #fffaeb;
+      --unmapped: #667085;
+      --unmapped-bg: #f2f4f7;
+      --code-bg: #f7f8f4;
+      --hl: #fff7d6;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
+      color: var(--ink);
+      background: var(--bg);
+    }
+    header.app {
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+      padding: 0.65rem 1rem;
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+    header.app a.back {
+      font-size: 0.8rem;
+      color: var(--muted);
+      text-decoration: none;
+    }
+    header.app a.back:hover { color: var(--accent); }
+    header.app h1 {
+      font-family: "IBM Plex Mono", ui-monospace, monospace;
+      font-size: 0.95rem;
+      font-weight: 600;
+      margin: 0;
+    }
+    header.app .meta {
+      margin-left: auto;
+      font-size: 0.8rem;
+      color: var(--muted);
+    }
+    .toolbar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+      align-items: center;
+      padding: 0.6rem 1rem;
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+    .counts { display: flex; gap: 0.4rem; flex-wrap: wrap; }
+    .chip {
+      font-family: "IBM Plex Mono", ui-monospace, monospace;
+      font-size: 0.72rem;
+      font-weight: 600;
+      padding: 0.28rem 0.55rem;
+      border-radius: 999px;
+      border: 1px solid var(--border);
+      background: #fff;
+      color: var(--muted);
+      cursor: pointer;
+    }
+    .chip.active { border-color: var(--accent); color: var(--accent); background: #eef5ef; }
+    .chip .n { opacity: 0.75; margin-left: 0.25rem; }
+    .badge {
+      font-family: "IBM Plex Mono", ui-monospace, monospace;
+      font-size: 0.65rem;
+      font-weight: 600;
+      padding: 0.12rem 0.35rem;
+      border-radius: 3px;
+      letter-spacing: 0.02em;
+    }
+    .badge.missing { background: var(--missing-bg); color: var(--missing); }
+    .badge.extra { background: var(--extra-bg); color: var(--extra); }
+    .badge.changed { background: var(--changed-bg); color: var(--changed); }
+    .badge.unmapped { background: var(--unmapped-bg); color: var(--unmapped); }
+    .workspace {
+      flex: 1;
+      display: grid;
+      grid-template-columns: minmax(280px, 38%) 1fr;
+      min-height: 0;
+    }
+    .list-pane {
+      border-right: 1px solid var(--border);
+      background: var(--surface);
+      overflow: auto;
+    }
+    .list-item {
+      display: grid;
+      grid-template-columns: auto 1fr;
+      gap: 0.45rem 0.65rem;
+      padding: 0.7rem 0.9rem;
+      border-bottom: 1px solid var(--border);
+      cursor: pointer;
+      align-items: start;
+    }
+    .list-item:hover { background: #f7f8f4; }
+    .list-item.selected {
+      background: #eef5ef;
+      box-shadow: inset 3px 0 0 var(--accent);
+    }
+    .list-item .key {
+      font-family: "IBM Plex Mono", ui-monospace, monospace;
+      font-size: 0.75rem;
+      word-break: break-all;
+      grid-column: 2;
+    }
+    .list-item .kind {
+      font-size: 0.7rem;
+      color: var(--muted);
+      grid-column: 2;
+    }
+    .detail-pane {
+      overflow: auto;
+      padding: 1rem 1.15rem 1.5rem;
+      display: flex;
+      flex-direction: column;
+      gap: 0.85rem;
+    }
+    .detail-pane.empty {
+      color: var(--muted);
+      align-items: center;
+      justify-content: center;
+    }
+    .detail-head {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+      align-items: center;
+    }
+    .detail-head h2 {
+      font-family: "IBM Plex Mono", ui-monospace, monospace;
+      font-size: 0.9rem;
+      font-weight: 600;
+      margin: 0;
+      word-break: break-all;
+    }
+    .detail-desc {
+      font-size: 0.92rem;
+      color: var(--muted);
+      margin: 0;
+    }
+    .values {
+      display: flex;
+      gap: 0.75rem;
+      flex-wrap: wrap;
+      font-family: "IBM Plex Mono", ui-monospace, monospace;
+      font-size: 0.8rem;
+    }
+    .values span {
+      background: var(--code-bg);
+      border: 1px solid var(--border);
+      padding: 0.35rem 0.55rem;
+      border-radius: 4px;
+    }
+    .values .arrow { background: none; border: none; color: var(--muted); padding: 0.35rem 0; }
+    .dual {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 0.75rem;
+      min-height: 0;
+      flex: 1;
+    }
+    @media (max-width: 900px) {
+      .workspace { grid-template-columns: 1fr; }
+      .dual { grid-template-columns: 1fr; }
+    }
+    .code-panel {
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: var(--surface);
+      display: flex;
+      flex-direction: column;
+      min-height: 220px;
+      overflow: hidden;
+    }
+    .code-panel header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 0.45rem 0.7rem;
+      border-bottom: 1px solid var(--border);
+      background: var(--code-bg);
+      font-size: 0.75rem;
+      font-weight: 600;
+    }
+    .code-panel header .side { color: var(--accent); }
+    .code-panel pre {
+      margin: 0;
+      padding: 0.75rem;
+      overflow: auto;
+      flex: 1;
+      font-family: "IBM Plex Mono", ui-monospace, monospace;
+      font-size: 0.72rem;
+      line-height: 1.45;
+      white-space: pre;
+    }
+    .code-panel pre .hl {
+      background: var(--hl);
+      display: inline;
+      box-decoration-break: clone;
+      -webkit-box-decoration-break: clone;
+    }
+    .code-panel.absent { opacity: 0.55; }
+    .code-panel.absent pre { color: var(--muted); font-style: italic; }
+  </style>
+</head>
+<body>
+  <header class="app">
+    <a class="back" href="index.html">← Gallery</a>
+    <h1>A · Master–detail</h1>
+    <span class="meta">source.bcn.conf → target.ibx.conf · 8 sample diffs</span>
+  </header>
+  <div class="toolbar" id="toolbar"></div>
+  <div class="workspace">
+    <div class="list-pane" id="list"></div>
+    <div class="detail-pane empty" id="detail">Select a difference</div>
+  </div>
+  <script src="sample-data.js"></script>
+  <script>
+    const state = { filter: "all", selected: 0 };
+
+    function renderToolbar() {
+      const counts = SAMPLE_COUNTS;
+      const cats = [
+        ["all", "All", counts.all],
+        ["missing", "Missing", counts.missing],
+        ["extra", "Extra", counts.extra],
+        ["changed", "Changed", counts.changed],
+        ["unmapped", "Unmapped", counts.unmapped],
+      ];
+      document.getElementById("toolbar").innerHTML =
+        `<div class="counts">${cats.map(([id, label, n]) =>
+          `<button type="button" class="chip ${state.filter === id ? "active" : ""}" data-f="${id}">${label}<span class="n">${n}</span></button>`
+        ).join("")}</div>`;
+      document.querySelectorAll(".chip").forEach((b) => {
+        b.addEventListener("click", () => {
+          state.filter = b.dataset.f;
+          const visible = filtered();
+          if (!visible.find((d) => d.id === state.selected)) {
+            state.selected = visible[0]?.id ?? null;
+          }
+          render();
+        });
+      });
+    }
+
+    function filtered() {
+      if (state.filter === "all") return SAMPLE_DIFFS;
+      return SAMPLE_DIFFS.filter((d) => d.category === state.filter);
+    }
+
+    function renderList() {
+      const items = filtered();
+      document.getElementById("list").innerHTML = items.map((d) => `
+        <div class="list-item ${d.id === state.selected ? "selected" : ""}" data-id="${d.id}">
+          <span class="badge ${d.category}">${d.categoryLabel}</span>
+          <div class="key">${escapeHtml(d.entityKey)}</div>
+          <div class="kind">${d.kind}</div>
+        </div>
+      `).join("");
+      document.querySelectorAll(".list-item").forEach((el) => {
+        el.addEventListener("click", () => {
+          state.selected = Number(el.dataset.id);
+          render();
+        });
+      });
+    }
+
+    function renderDetail() {
+      const d = SAMPLE_DIFFS.find((x) => x.id === state.selected);
+      const pane = document.getElementById("detail");
+      if (!d) {
+        pane.className = "detail-pane empty";
+        pane.textContent = "No differences in this filter";
+        return;
+      }
+      pane.className = "detail-pane";
+      const values = d.sourceValue != null
+        ? `<div class="values"><span>source: ${escapeHtml(d.sourceValue)}</span><span class="arrow">→</span><span>target: ${escapeHtml(d.targetValue)}</span></div>`
+        : "";
+      pane.innerHTML = `
+        <div class="detail-head">
+          <span class="badge ${d.category}">${d.categoryLabel}</span>
+          <h2>${escapeHtml(d.entityKey)}</h2>
+        </div>
+        <p class="detail-desc">${escapeHtml(d.detail)}</p>
+        ${values}
+        <div class="dual">
+          <div class="code-panel ${d.sourceBlock ? "" : "absent"}">
+            <header><span class="side">Source</span><span>${escapeHtml(d.sourceFile)}</span></header>
+            <pre>${d.sourceBlock ? formatBlock(d.sourceBlock, d.highlightLines?.source) : "(not present in source)"}</pre>
+          </div>
+          <div class="code-panel ${d.targetBlock ? "" : "absent"}">
+            <header><span class="side">Target</span><span>${escapeHtml(d.targetFile)}</span></header>
+            <pre>${d.targetBlock ? formatBlock(d.targetBlock, d.highlightLines?.target) : "(not present in target)"}</pre>
+          </div>
+        </div>
+      `;
+    }
+
+    function formatBlock(text, hlLines) {
+      const set = new Set(hlLines || []);
+      return text.split("\n").map((line, i) => {
+        const n = i + 1;
+        const body = escapeHtml(line) || " ";
+        return set.has(n) ? `<span class="hl">${body}</span>\n` : `${body}\n`;
+      }).join("").replace(/\n$/, "");
+    }
+
+    function escapeHtml(s) {
+      return String(s)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;");
+    }
+
+    function render() {
+      renderToolbar();
+      renderList();
+      renderDetail();
+    }
+
+    render();
+  </script>
+</body>
+</html>

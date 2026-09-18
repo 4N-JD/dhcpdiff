@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>dhcpdiff</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/static/app.css" />
+</head>
+<body>
+  <header class="app">
+    <h1>dhcpdiff</h1>
+    <span class="meta" id="statusMeta">Upload two configs and run a diff</span>
+  </header>
+
+  <section class="setup" id="setup">
+    <div class="setup-grid">
+      <div class="field">
+        <label for="sourceFile">Source config</label>
+        <input type="file" id="sourceFile" />
+        <select id="sourceVendor" aria-label="Source vendor"></select>
+      </div>
+      <div class="field">
+        <label for="targetFile">Target config</label>
+        <input type="file" id="targetFile" />
+        <select id="targetVendor" aria-label="Target vendor"></select>
+      </div>
+      <div class="field toggles">
+        <label class="check"><input type="checkbox" id="ignoreUnmapped" checked /> Ignore unmapped options</label>
+        <label class="check"><input type="checkbox" id="ignoreSubnetMask" checked /> Ignore subnet-mask (option 1)</label>
+      </div>
+      <div class="field actions">
+        <button type="button" class="primary" id="runBtn">Run Diff</button>
+      </div>
+    </div>
+
+    <details class="mapping" id="mappingPanel" open>
+      <summary>Option mapping (user.yaml)</summary>
+      <div class="mapping-body">
+        <p class="hint">Replaces the interactive <code>dhcpdiff map</code> TUI. Edit YAML, or add an alias from an unknown option below.</p>
+        <div class="alias-row" id="aliasRow" hidden>
+          <strong>Unknowns detected</strong>
+          <ul id="unknownList"></ul>
+          <div class="alias-form">
+            <input type="text" id="aliasName" placeholder="option name" />
+            <input type="text" id="aliasSpace" placeholder="space" value="dhcp" />
+            <input type="number" id="aliasCode" placeholder="code" min="0" />
+            <button type="button" id="addAliasBtn">Add alias</button>
+          </div>
+        </div>
+        <textarea id="mappingYaml" spellcheck="false" rows="10"></textarea>
+        <div class="mapping-actions">
+          <button type="button" id="downloadMappingBtn">Download YAML</button>
+          <button type="button" id="resetMappingBtn">Reset to default</button>
+        </div>
+      </div>
+    </details>
+
+    <div class="error" id="errorBox" hidden></div>
+  </section>
+
+  <div class="toolbar" id="toolbar" hidden></div>
+  <div class="workspace" id="workspace" hidden>
+    <div class="list-pane" id="list"></div>
+    <div class="detail-pane empty" id="detail">Select a difference</div>
+  </div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

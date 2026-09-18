@@ -1,0 +1,52 @@
+# RFC 2132 / ISC standard DHCP option names (vendor-neutral)
+options:
+  - name: subnet-mask
+    code: 1
+  - name: routers
+    code: 3
+    aliases: [default-router]
+  - name: domain-name-servers
+    code: 6
+    aliases: [dns-servers, "006"]
+  - name: host-name
+    code: 12
+  - name: domain-name
+    code: 15
+  - name: broadcast-address
+    code: 28
+  - name: ntp-servers
+    code: 42
+  - name: vendor-specific
+    code: 43
+    aliases: [vendor-encapsulated-options]
+  - name: netbios-name-servers
+    code: 44
+  - name: netbios-node-type
+    code: 46
+  - name: dhcp-lease-time
+    code: 51
+    aliases: [default-lease-time]
+  - name: dhcp-message-type
+    code: 53
+  - name: dhcp-server-identifier
+    code: 54
+  - name: domain-search
+    code: 119
+  - name: vendor-class-identifier
+    code: 60
+  - name: dhcp-client-identifier
+    code: 61
+  - name: fqdn
+    code: 81
+  - name: tftp-server-name
+    code: 66
+    aliases: [server-name, dhcp-tftp-server]
+  - name: dhcp-bootfile-name
+    code: 67
+    aliases: [bootfile-name]
+  - name: ip-forwarding
+    code: 19
+  - name: non-local-source-routing
+    code: 20
+  - name: resource-location-servers
+    code: 11

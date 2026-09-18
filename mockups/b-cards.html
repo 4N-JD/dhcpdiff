@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>B — Expandable cards · dhcpdiff mockup</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg: #eef0ea;
+      --surface: #ffffff;
+      --ink: #1a1d18;
+      --muted: #5c6358;
+      --border: #cfd4c8;
+      --accent: #2f5d3a;
+      --missing: #b42318;
+      --missing-bg: #fef3f2;
+      --extra: #175cd3;
+      --extra-bg: #eff8ff;
+      --changed: #b54708;
+      --changed-bg: #fffaeb;
+      --unmapped: #667085;
+      --unmapped-bg: #f2f4f7;
+      --code-bg: #f7f8f4;
+      --hl: #fff7d6;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
+      color: var(--ink);
+      background: var(--bg);
+    }
+    header.app {
+      position: sticky;
+      top: 0;
+      z-index: 10;
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+      padding: 0.65rem 1rem;
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+    }
+    header.app a.back { font-size: 0.8rem; color: var(--muted); text-decoration: none; }
+    header.app a.back:hover { color: var(--accent); }
+    header.app h1 {
+      font-family: "IBM Plex Mono", ui-monospace, monospace;
+      font-size: 0.95rem;
+      font-weight: 600;
+      margin: 0;
+    }
+    header.app .meta { margin-left: auto; font-size: 0.8rem; color: var(--muted); }
+    .toolbar {
+      position: sticky;
+      top: 45px;
+      z-index: 9;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+      padding: 0.6rem 1rem;
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+    }
+    .chip {
+      font-family: "IBM Plex Mono", ui-monospace, monospace;
+      font-size: 0.72rem;
+      font-weight: 600;
+      padding: 0.28rem 0.55rem;
+      border-radius: 999px;
+      border: 1px solid var(--border);
+      background: #fff;
+      color: var(--muted);
+      cursor: pointer;
+    }
+    .chip.active { border-color: var(--accent); color: var(--accent); background: #eef5ef; }
+    .chip .n { opacity: 0.75; margin-left: 0.25rem; }
+    .badge {
+      font-family: "IBM Plex Mono", ui-monospace, monospace;
+      font-size: 0.65rem;
+      font-weight: 600;
+      padding: 0.12rem 0.35rem;
+      border-radius: 3px;
+    }
+    .badge.missing { background: var(--missing-bg); color: var(--missing); }
+    .badge.extra { background: var(--extra-bg); color: var(--extra); }
+    .badge.changed { background: var(--changed-bg); color: var(--changed); }
+    .badge.unmapped { background: var(--unmapped-bg); color: var(--unmapped); }
+    main {
+      max-width: 960px;
+      margin: 0 auto;
+      padding: 1rem 1rem 2.5rem;
+      display: flex;
+      flex-direction: column;
+      gap: 0.55rem;
+    }
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      overflow: hidden;
+    }
+    .card-head {
+      display: grid;
+      grid-template-columns: auto 1fr auto;
+      gap: 0.65rem;
+      align-items: start;
+      padding: 0.75rem 0.9rem;
+      cursor: pointer;
+      width: 100%;
+      text-align: left;
+      border: none;
+      background: transparent;
+      font: inherit;
+      color: inherit;
+    }
+    .card-head:hover { background: #f7f8f4; }
+    .card.open .card-head { background: #eef5ef; }
+    .card-head .key {
+      font-family: "IBM Plex Mono", ui-monospace, monospace;
+      font-size: 0.78rem;
+      word-break: break-all;
+    }
+    .card-head .summary {
+      font-size: 0.8rem;
+      color: var(--muted);
+      margin-top: 0.2rem;
+    }
+    .chevron {
+      font-family: "IBM Plex Mono", ui-monospace, monospace;
+      color: var(--muted);
+      font-size: 0.85rem;
+      padding-top: 0.1rem;
+    }
+    .card-body {
+      display: none;
+      padding: 0 0.9rem 0.9rem;
+      border-top: 1px solid var(--border);
+    }
+    .card.open .card-body { display: block; }
+    .detail-desc {
+      font-size: 0.9rem;
+      color: var(--muted);
+      margin: 0.75rem 0;
+    }
+    .values {
+      display: flex;
+      gap: 0.75rem;
+      flex-wrap: wrap;
+      font-family: "IBM Plex Mono", ui-monospace, monospace;
+      font-size: 0.8rem;
+      margin-bottom: 0.75rem;
+    }
+    .values span {
+      background: var(--code-bg);
+      border: 1px solid var(--border);
+      padding: 0.35rem 0.55rem;
+      border-radius: 4px;
+    }
+    .values .arrow { background: none; border: none; color: var(--muted); padding: 0.35rem 0; }
+    .dual {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 0.65rem;
+    }
+    @media (max-width: 720px) { .dual { grid-template-columns: 1fr; } }
+    .code-panel {
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: var(--surface);
+      overflow: hidden;
+    }
+    .code-panel header {
+      display: flex;
+      justify-content: space-between;
+      padding: 0.4rem 0.65rem;
+      border-bottom: 1px solid var(--border);
+      background: var(--code-bg);
+      font-size: 0.72rem;
+      font-weight: 600;
+    }
+    .code-panel header .side { color: var(--accent); }
+    .code-panel pre {
+      margin: 0;
+      padding: 0.65rem;
+      overflow: auto;
+      font-family: "IBM Plex Mono", ui-monospace, monospace;
+      font-size: 0.7rem;
+      line-height: 1.45;
+      white-space: pre;
+      max-height: 240px;
+    }
+    .code-panel pre .hl { background: var(--hl); }
+    .code-panel.absent { opacity: 0.55; }
+    .code-panel.absent pre { color: var(--muted); font-style: italic; }
+  </style>
+</head>
+<body>
+  <header class="app">
+    <a class="back" href="index.html">← Gallery</a>
+    <h1>B · Expandable cards</h1>
+    <span class="meta">Click a card to expand side-by-side blocks</span>
+  </header>
+  <div class="toolbar" id="toolbar"></div>
+  <main id="cards"></main>
+  <script src="sample-data.js"></script>
+  <script>
+    const state = { filter: "all", open: new Set([2]) };
+
+    function filtered() {
+      if (state.filter === "all") return SAMPLE_DIFFS;
+      return SAMPLE_DIFFS.filter((d) => d.category === state.filter);
+    }
+
+    function formatBlock(text, hlLines) {
+      const set = new Set(hlLines || []);
+      return text.split("\n").map((line, i) => {
+        const body = escapeHtml(line) || " ";
+        return set.has(i + 1) ? `<span class="hl">${body}</span>\n` : `${body}\n`;
+      }).join("").replace(/\n$/, "");
+    }
+
+    function escapeHtml(s) {
+      return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+    }
+
+    function shortDetail(d) {
+      const t = d.detail;
+      return t.length > 90 ? t.slice(0, 87) + "…" : t;
+    }
+
+    function render() {
+      const counts = SAMPLE_COUNTS;
+      const cats = [
+        ["all", "All", counts.all],
+        ["missing", "Missing", counts.missing],
+        ["extra", "Extra", counts.extra],
+        ["changed", "Changed", counts.changed],
+        ["unmapped", "Unmapped", counts.unmapped],
+      ];
+      document.getElementById("toolbar").innerHTML = cats.map(([id, label, n]) =>
+        `<button type="button" class="chip ${state.filter === id ? "active" : ""}" data-f="${id}">${label}<span class="n">${n}</span></button>`
+      ).join("");
+      document.querySelectorAll(".chip").forEach((b) => {
+        b.addEventListener("click", () => { state.filter = b.dataset.f; render(); });
+      });
+
+      document.getElementById("cards").innerHTML = filtered().map((d) => {
+        const open = state.open.has(d.id);
+        const values = d.sourceValue != null
+          ? `<div class="values"><span>source: ${escapeHtml(d.sourceValue)}</span><span class="arrow">→</span><span>target: ${escapeHtml(d.targetValue)}</span></div>`
+          : "";
+        return `
+          <article class="card ${open ? "open" : ""}" data-id="${d.id}">
+            <button type="button" class="card-head" aria-expanded="${open}">
+              <span class="badge ${d.category}">${d.categoryLabel}</span>
+              <div>
+                <div class="key">${escapeHtml(d.entityKey)}</div>
+                <div class="summary">${escapeHtml(shortDetail(d))}</div>
+              </div>
+              <span class="chevron">${open ? "▾" : "▸"}</span>
+            </button>
+            <div class="card-body">
+              <p class="detail-desc">${escapeHtml(d.detail)}</p>
+              ${values}
+              <div class="dual">
+                <div class="code-panel ${d.sourceBlock ? "" : "absent"}">
+                  <header><span class="side">Source</span><span>${escapeHtml(d.sourceFile)}</span></header>
+                  <pre>${d.sourceBlock ? formatBlock(d.sourceBlock, d.highlightLines?.source) : "(not present in source)"}</pre>
+                </div>
+                <div class="code-panel ${d.targetBlock ? "" : "absent"}">
+                  <header><span class="side">Target</span><span>${escapeHtml(d.targetFile)}</span></header>
+                  <pre>${d.targetBlock ? formatBlock(d.targetBlock, d.highlightLines?.target) : "(not present in target)"}</pre>
+                </div>
+              </div>
+            </div>
+          </article>
+        `;
+      }).join("");
+
+      document.querySelectorAll(".card-head").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          const id = Number(btn.closest(".card").dataset.id);
+          if (state.open.has(id)) state.open.delete(id);
+          else state.open.add(id);
+          render();
+        });
+      });
+    }
+
+    render();
+  </script>
+</body>
+</html>

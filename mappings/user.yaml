@@ -1,0 +1,7 @@
+aliases: []
+equivalences: []
+ignore:
+  - space: dhcp
+    code: 28
+# Ignore dhcp option 1 (subnet-mask); redundant with subnet netmask declaration.
+ignore_subnet_mask: true

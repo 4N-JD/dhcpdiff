@@ -1,0 +1,105 @@
+"""Unit tests for snippet slicing and unknown parsing (no server required)."""
+
+from __future__ import annotations
+
+import sys
+import unittest
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+
+from app.diff_runner import parse_unknowns_from_text  # noqa: E402
+from app.entity_display import build_entity_display  # noqa: E402
+from app.snippets import enrich_entries_with_snippets, slice_block  # noqa: E402
+
+
+class SnippetTests(unittest.TestCase):
+    def test_slice_with_end_line(self):
+        text = "a\nb\nc\nd\ne\n"
+        snip = slice_block(text, 2, 4, focus_line=3)
+        assert snip is not None
+        self.assertEqual(snip["text"], "b\nc\nd")
+        self.assertEqual(snip["highlight_lines"], [2])
+
+    def test_brace_match(self):
+        text = "subnet 10.0.0.0 netmask 255.255.255.0 {\n  pool {\n    range 1 2;\n  }\n}\n"
+        snip = slice_block(text, 1, None)
+        assert snip is not None
+        self.assertIn("subnet", snip["text"])
+        self.assertTrue(snip["text"].rstrip().endswith("}"))
+
+
+class UnknownParseTests(unittest.TestCase):
+    def test_parse_unknowns(self):
+        text = """Unknown options requiring mapping (2):
+  - Avaya-IP-Phone (usages: 3, sites: subnet, pool)
+  - weird-opt (usages: 1, sites: global)
+unmapped options remain; run 'dhcpdiff map' or pass --ignore-unmapped
+"""
+        unknowns = parse_unknowns_from_text(text)
+        self.assertEqual(len(unknowns), 2)
+        self.assertEqual(unknowns[0]["raw_name"], "Avaya-IP-Phone")
+        self.assertEqual(unknowns[0]["usage_count"], 3)
+
+
+class EnrichTests(unittest.TestCase):
+    def test_enrich(self):
+        source = "subnet x {\n  option a;\n}\n"
+        target = "subnet x {\n  option b;\n}\n"
+        report = {
+            "entries": [
+                {
+                    "category": "changed",
+                    "locations": {
+                        "source": {"file": "a.conf", "line": 1, "end_line": 3},
+                        "target": {"file": "b.conf", "line": 1, "end_line": 3},
+                    },
+                }
+            ]
+        }
+        out = enrich_entries_with_snippets(report, source, target)
+        self.assertIn("snippets", out["entries"][0])
+        self.assertIn("option a", out["entries"][0]["snippets"]["source"]["text"])
+
+    def test_enrich_nested_affected(self):
+        source = "line1\nline2\nline3\n"
+        target = "line1\nline2\nline3\n"
+        report = {
+            "entries": [
+                {
+                    "category": "changed",
+                    "locations": {
+                        "source": {
+                            "affected": {"file": "a.conf", "line": 2, "end_line": 3},
+                            "declaration": {"file": "a.conf", "line": 1, "end_line": 1},
+                        },
+                        "target": {
+                            "affected": {"file": "b.conf", "line": 2, "end_line": 2},
+                        },
+                    },
+                }
+            ]
+        }
+        out = enrich_entries_with_snippets(report, source, target)
+        self.assertEqual(out["entries"][0]["snippets"]["source"]["start_line"], 2)
+        self.assertEqual(out["entries"][0]["snippets"]["source"]["text"], "line2\nline3")
+
+
+class EntityDisplayTests(unittest.TestCase):
+    def test_option_with_vci(self):
+        d = build_entity_display(
+            "option",
+            "pool:10.162.40.0/24:10.162.40.250-10.162.40.251:vci=PXEClient:bootp:0 (next-server)",
+        )
+        self.assertEqual(d["object_type"], "Option")
+        self.assertEqual(d["name"], "bootp:0 (next-server)")
+        self.assertEqual(
+            d["parent"], "Pool 10.162.40.250-10.162.40.251 in subnet 10.162.40.0/24"
+        )
+        self.assertEqual(d["vci"], "PXEClient")
+        self.assertIn("affects clients with VCI PXEClient", d["summary"])
+
+
+if __name__ == "__main__":
+    unittest.main()

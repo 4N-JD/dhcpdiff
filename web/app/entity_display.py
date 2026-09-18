@@ -1,0 +1,171 @@
+"""Parse opaque entity keys into human-readable display fields (fallback if CLI omits them)."""
+
+from __future__ import annotations
+
+from typing import Any
+
+
+def build_entity_display(kind: str, key: str) -> dict[str, Any]:
+    if kind == "subnet":
+        return {
+            "object_type": "Subnet",
+            "name": key,
+            "parent": None,
+            "vci": None,
+            "declared_in": None,
+            "summary": f"Subnet {key}",
+        }
+    if kind == "pool":
+        if ":" in key:
+            cidr, range = key.split(":", 1)
+            return {
+                "object_type": "Pool",
+                "name": range,
+                "parent": f"Subnet {cidr}",
+                "vci": None,
+                "declared_in": None,
+                "summary": f"Pool {range} in subnet {cidr}",
+            }
+        return {
+            "object_type": "Pool",
+            "name": key,
+            "parent": None,
+            "vci": None,
+            "declared_in": None,
+            "summary": f"Pool {key}",
+        }
+    if kind == "reservation":
+        return {
+            "object_type": "Reservation",
+            "name": key,
+            "parent": None,
+            "vci": None,
+            "declared_in": None,
+            "summary": f"Reservation {key}",
+        }
+    if kind == "filter":
+        parts = key.split(":", 2)
+        if len(parts) >= 2:
+            scope, name = parts[0], parts[1]
+            parent = "Global" if scope == "global" else f"Subnet {scope}"
+            return {
+                "object_type": "Filter",
+                "name": name,
+                "parent": parent,
+                "vci": None,
+                "declared_in": None,
+                "summary": f"Filter {name} ({parent})",
+            }
+        return {
+            "object_type": "Filter",
+            "name": key,
+            "parent": None,
+            "vci": None,
+            "declared_in": None,
+            "summary": f"Filter {key}",
+        }
+    if kind == "option":
+        return _parse_option_display(key)
+    return {
+        "object_type": kind[:1].upper() + kind[1:] if kind else "Entity",
+        "name": key,
+        "parent": None,
+        "vci": None,
+        "declared_in": None,
+        "summary": f"{kind}:{key}",
+    }
+
+
+def _parse_option_display(key: str) -> dict[str, Any]:
+    scope, option_name, vci = _split_option_key(key)
+    object_type, name, parent, summary_base = _describe_option_scope(scope, option_name)
+    summary = (
+        f"{summary_base} — affects clients with VCI {vci}" if vci else summary_base
+    )
+    return {
+        "object_type": object_type,
+        "name": name,
+        "parent": parent,
+        "vci": vci,
+        "declared_in": None,
+        "summary": summary,
+    }
+
+
+def _split_option_key(key: str) -> tuple[str, str, str | None]:
+    marker = ":vci="
+    idx = key.find(marker)
+    if idx >= 0:
+        before = key[:idx]
+        after = key[idx + len(marker) :]
+        if ":" in after:
+            vci, rest = after.split(":", 1)
+            return before, rest, vci
+        return before, "", after
+
+    peeled = _peel_option_suffix(key)
+    if peeled:
+        return peeled[0], peeled[1], None
+    return "", key, None
+
+
+def _peel_option_suffix(key: str) -> tuple[str, str] | None:
+    label_start = key.rfind(" (")
+    code_region_end = label_start if label_start >= 0 else len(key)
+    i = code_region_end
+    while i > 0 and key[i - 1].isdigit():
+        i -= 1
+    if i == code_region_end or i == 0 or key[i - 1] != ":":
+        if ":" in key:
+            scope, option = key.rsplit(":", 1)
+            if "(" in option or "." not in option:
+                return scope, option
+        return None
+    code_colon = i - 1
+    j = code_colon
+    while j > 0 and key[j - 1] != ":":
+        j -= 1
+    if j == 0:
+        return None
+    space_start = j
+    scope = key[: space_start - 1]
+    option = key[space_start:]
+    if not scope or not option:
+        return None
+    return scope, option
+
+
+def _describe_option_scope(scope: str, option_name: str) -> tuple[str, str, str | None, str]:
+    name = option_name or "option"
+    if not scope or scope == "global":
+        return "Option", name, "Global", f"Option {name} (global)"
+    if scope.startswith("pool:"):
+        rest = scope[len("pool:") :]
+        if ":" in rest:
+            cidr, range = rest.split(":", 1)
+            parent = f"Pool {range} in subnet {cidr}"
+            return "Option", name, parent, f"Option {name} on {parent}"
+        parent = f"Pool {rest}"
+        return "Option", name, parent, f"Option {name} on {parent}"
+    if scope.startswith("reservation:"):
+        ip = scope[len("reservation:") :]
+        parent = f"Reservation {ip}"
+        return "Option", name, parent, f"Option {name} on {parent}"
+    return "Option", name, scope, f"Option {name} ({scope})"
+
+
+def enrich_entries_with_display(report: dict[str, Any]) -> dict[str, Any]:
+    entries = report.get("entries") or []
+    out_entries = []
+    for entry in entries:
+        item = dict(entry)
+        entity = dict(item.get("entity") or {})
+        if not entity.get("display"):
+            kind = entity.get("kind") or ""
+            key = entity.get("key") or ""
+            entity["display"] = build_entity_display(kind, key)
+            item["entity"] = entity
+        out_entries.append(item)
+    out = dict(report)
+    out["entries"] = out_entries
+    return out

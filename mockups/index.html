@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>dhcpdiff — Diff view mockups</title>
+  <style>
+    :root {
+      --bg: #f4f5f2;
+      --surface: #ffffff;
+      --ink: #1a1d18;
+      --muted: #5c6358;
+      --border: #d5d9d0;
+      --accent: #2f5d3a;
+      --missing: #b42318;
+      --extra: #175cd3;
+      --changed: #b54708;
+      --unmapped: #667085;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
+      background:
+        radial-gradient(ellipse 80% 50% at 10% -10%, #dfe8d8 0%, transparent 55%),
+        radial-gradient(ellipse 60% 40% at 100% 0%, #e4ebe8 0%, transparent 50%),
+        var(--bg);
+      color: var(--ink);
+      min-height: 100vh;
+      line-height: 1.45;
+    }
+    main {
+      max-width: 920px;
+      margin: 0 auto;
+      padding: 3rem 1.5rem 4rem;
+    }
+    h1 {
+      font-family: "IBM Plex Mono", "SF Mono", ui-monospace, monospace;
+      font-size: 1.75rem;
+      font-weight: 600;
+      letter-spacing: -0.02em;
+      margin: 0 0 0.35rem;
+    }
+    .lede {
+      color: var(--muted);
+      max-width: 40rem;
+      margin: 0 0 2rem;
+    }
+    .grid {
+      display: grid;
+      gap: 1rem;
+    }
+    @media (min-width: 700px) {
+      .grid { grid-template-columns: 1fr 1fr; }
+    }
+    a.card {
+      display: block;
+      text-decoration: none;
+      color: inherit;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 1.15rem 1.25rem;
+      transition: border-color 120ms ease, transform 120ms ease;
+    }
+    a.card:hover {
+      border-color: var(--accent);
+      transform: translateY(-1px);
+    }
+    a.card:focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 2px;
+    }
+    .label {
+      font-family: "IBM Plex Mono", ui-monospace, monospace;
+      font-size: 0.75rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--accent);
+      margin-bottom: 0.35rem;
+    }
+    .card h2 {
+      font-size: 1.1rem;
+      margin: 0 0 0.4rem;
+      font-weight: 600;
+    }
+    .card p {
+      margin: 0;
+      font-size: 0.92rem;
+      color: var(--muted);
+    }
+    .ascii {
+      margin-top: 0.85rem;
+      padding: 0.65rem 0.75rem;
+      background: #f0f2ec;
+      border-radius: 4px;
+      font-family: "IBM Plex Mono", ui-monospace, monospace;
+      font-size: 0.68rem;
+      line-height: 1.35;
+      color: #3d4438;
+      white-space: pre;
+      overflow-x: auto;
+    }
+    .note {
+      margin-top: 2rem;
+      font-size: 0.85rem;
+      color: var(--muted);
+      border-top: 1px solid var(--border);
+      padding-top: 1rem;
+    }
+    .swatches {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+      margin-top: 0.75rem;
+    }
+    .swatch {
+      font-family: "IBM Plex Mono", ui-monospace, monospace;
+      font-size: 0.7rem;
+      padding: 0.15rem 0.45rem;
+      border-radius: 3px;
+      font-weight: 600;
+    }
+    .swatch.missing { background: #fef3f2; color: var(--missing); }
+    .swatch.extra { background: #eff8ff; color: var(--extra); }
+    .swatch.changed { background: #fffaeb; color: var(--changed); }
+    .swatch.unmapped { background: #f2f4f7; color: var(--unmapped); }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>dhcpdiff mockups</h1>
+    <p class="lede">
+      Four layouts for the semantic diff results view. Same sample data in each —
+      open them, click around, then pick the one that feels right for triage.
+    </p>
+    <div class="swatches">
+      <span class="swatch missing">MISSING</span>
+      <span class="swatch extra">EXTRA</span>
+      <span class="swatch changed">CHANGED</span>
+      <span class="swatch unmapped">UNMAPPED</span>
+    </div>
+    <div class="grid" style="margin-top: 1.5rem;">
+      <a class="card" href="a-master-detail.html">
+        <div class="label">A</div>
+        <h2>Master–detail</h2>
+        <p>Filterable list on the left; description and side-by-side blocks on the right. Strong for large result sets.</p>
+        <div class="ascii">[ list ] │ description
+         │ ┌src──┐ ┌tgt──┐
+         │ │block│ │block│</div>
+      </a>
+      <a class="card" href="b-cards.html">
+        <div class="label">B</div>
+        <h2>Expandable cards</h2>
+        <p>Vertical stack of summaries. Expand a card to reveal description and dual config panes inline.</p>
+        <div class="ascii">▼ CHANGED option …
+  description
+  ┌src──┐ ┌tgt──┐</div>
+      </a>
+      <a class="card" href="c-ide.html">
+        <div class="label">C</div>
+        <h2>Three-pane IDE</h2>
+        <p>Always-visible source and target file viewers. Selecting a diff scrolls and highlights matching blocks.</p>
+        <div class="ascii">list │ source.conf │ target.conf
+     │ (highlight) │ (highlight)</div>
+      </a>
+      <a class="card" href="d-table-drawer.html">
+        <div class="label">D</div>
+        <h2>Table + drawer</h2>
+        <p>Spreadsheet-style triage with inline value changes. Click a row for full detail and side-by-side blocks.</p>
+        <div class="ascii">Category │ Kind │ Entity │ Values
+[drawer → description + blocks]</div>
+      </a>
+    </div>
+    <p class="note">
+      Static HTML only — open any file in a browser. No server required.
+      After you choose, we’ll build the real UI around that layout.
+    </p>
+  </main>
+</body>
+</html>
