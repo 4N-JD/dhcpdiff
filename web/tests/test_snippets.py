@@ -10,7 +10,12 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from app.diff_runner import parse_unknowns_from_text  # noqa: E402
-from app.entity_display import build_entity_display  # noqa: E402
+from app.entity_display import (  # noqa: E402
+    build_entity_display,
+    parse_option_detail_value,
+    parse_option_scope_and_ref,
+    parse_option_space_code,
+)
 from app.snippets import enrich_entries_with_snippets, slice_block  # noqa: E402
 
 
@@ -99,6 +104,36 @@ class EntityDisplayTests(unittest.TestCase):
         )
         self.assertEqual(d["vci"], "PXEClient")
         self.assertIn("affects clients with VCI PXEClient", d["summary"])
+
+    def test_parse_option_space_code(self):
+        self.assertEqual(
+            parse_option_space_code("MSFT50:1 (foo)"),
+            {"space": "MSFT50", "code": 1},
+        )
+        self.assertEqual(
+            parse_option_space_code("global:Microsoft-Windows-Options:2"),
+            {"space": "Microsoft-Windows-Options", "code": 2},
+        )
+        self.assertIsNone(parse_option_space_code("not-an-option"))
+
+    def test_parse_option_scope_and_ref(self):
+        ref = parse_option_scope_and_ref("10.0.0.0/24:MSFT50:3 (x)")
+        self.assertEqual(ref["scope"], "10.0.0.0/24")
+        self.assertEqual(ref["space"], "MSFT50")
+        self.assertEqual(ref["code"], 3)
+
+    def test_parse_option_detail_value(self):
+        self.assertEqual(
+            parse_option_detail_value(
+                'option MSFT50:1 (foo) = String("bar") missing in target'
+            ),
+            'String("bar")',
+        )
+        self.assertEqual(
+            parse_option_detail_value("option dhcp:6 = IpList([1.2.3.4]) extra in target"),
+            "IpList([1.2.3.4])",
+        )
+        self.assertIsNone(parse_option_detail_value("changed somehow"))
 
 
 if __name__ == "__main__":

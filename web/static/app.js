@@ -15,6 +15,9 @@
     selected: null,
     selectedEntry: null,
     unknowns: [],
+    suggestions: [],
+    mapOptionOpen: false,
+    suggestionsOpen: false,
     listCache: new Map(), // `${filter}:${page}` -> entries[]
     lineCache: new Map(), // `${side}:${start}:${end}` -> lines
     listScrollTop: 0,
@@ -55,6 +58,99 @@
 
   function categoryLabel(cat) {
     return String(cat || "").toUpperCase();
+  }
+
+  function peelOptionSuffix(key) {
+    const text = String(key || "");
+    if (!text) return null;
+    const labelStart = text.lastIndexOf(" (");
+    const codeRegionEnd = labelStart >= 0 ? labelStart : text.length;
+    let i = codeRegionEnd;
+    while (i > 0 && /\d/.test(text[i - 1])) i -= 1;
+    if (i === codeRegionEnd || i === 0 || text[i - 1] !== ":") {
+      const colon = text.lastIndexOf(":");
+      if (colon > 0) {
+        const scope = text.slice(0, colon);
+        const option = text.slice(colon + 1);
+        if (option.includes("(") || !option.includes(".")) return [scope, option];
+      }
+      return null;
+    }
+    const codeColon = i - 1;
+    let j = codeColon;
+    while (j > 0 && text[j - 1] !== ":") j -= 1;
+    if (j === 0) return null;
+    const spaceStart = j;
+    const scope = text.slice(0, spaceStart - 1);
+    const option = text.slice(spaceStart);
+    if (!scope || !option) return null;
+    return [scope, option];
+  }
+
+  function spaceCodeFromLabel(label) {
+    let text = String(label || "").trim();
+    if (!text) return null;
+    const paren = text.lastIndexOf(" (");
+    if (paren >= 0 && text.endsWith(")")) text = text.slice(0, paren);
+    const colon = text.lastIndexOf(":");
+    if (colon < 0) return null;
+    const space = text.slice(0, colon).trim();
+    const codeS = text.slice(colon + 1).trim();
+    if (!space || !/^\d+$/.test(codeS)) return null;
+    return { space, code: Number(codeS) };
+  }
+
+  function parseOptionSpaceCode(keyOrName) {
+    const text = String(keyOrName || "").trim();
+    if (!text) return null;
+    const peeled = peelOptionSuffix(text);
+    const label = peeled ? peeled[1] : text;
+    return spaceCodeFromLabel(label);
+  }
+
+  function optionRefFromEntry(entry) {
+    if (!entry || entry.entity?.kind !== "option") return null;
+    const name = entry.entity?.display?.name;
+    return parseOptionSpaceCode(name) || parseOptionSpaceCode(entry.entity?.key || "");
+  }
+
+  function formatOptionRef(ref) {
+    if (!ref) return "";
+    return `${ref.space}:${ref.code}`;
+  }
+
+  function equivalenceAlreadyInYaml(source, target) {
+    const yaml = $("mappingYaml")?.value || "";
+    if (!yaml) return false;
+    // Heuristic: both space/code pairs appear near each other under equivalences.
+    const srcPat = new RegExp(
+      `space:\\s*["']?${escapeRegex(source.space)}["']?[\\s\\S]{0,80}?code:\\s*${source.code}`
+    );
+    const tgtPat = new RegExp(
+      `space:\\s*["']?${escapeRegex(target.space)}["']?[\\s\\S]{0,80}?code:\\s*${target.code}`
+    );
+    const eqIdx = yaml.search(/^equivalences:/m);
+    const slice = eqIdx >= 0 ? yaml.slice(eqIdx) : yaml;
+    return srcPat.test(slice) && tgtPat.test(slice);
+  }
+
+  function escapeRegex(s) {
+    return String(s).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  }
+
+  function suggestionForEntry(entry) {
+    const ref = optionRefFromEntry(entry);
+    if (!ref || !state.suggestions?.length) return null;
+    const cat = entry.category;
+    for (const s of state.suggestions) {
+      if (cat === "missing" && s.source.space === ref.space && s.source.code === ref.code) {
+        return s;
+      }
+      if (cat === "extra" && s.target.space === ref.space && s.target.code === ref.code) {
+        return s;
+      }
+    }
+    return null;
   }
 
   function fillVendors(select, vendors, selected) {
@@ -223,6 +319,8 @@
         state.filter = b.dataset.f;
         state.listCache.clear();
         state.listScrollTop = 0;
+        state.mapOptionOpen = false;
+        state.suggestionsOpen = false;
         await bootstrapListSelection();
         renderToolbar();
         renderListShell();
@@ -299,7 +397,12 @@
     windowEl.innerHTML = parts.join("");
     windowEl.querySelectorAll(".list-item").forEach((el) => {
       el.addEventListener("click", async () => {
-        state.selected = Number(el.dataset.i);
+        const next = Number(el.dataset.i);
+        if (next !== state.selected) {
+          state.mapOptionOpen = false;
+          state.suggestionsOpen = false;
+        }
+        state.selected = next;
         await paintList();
         await showSelectedDetail();
       });
@@ -354,6 +457,7 @@
       : "";
     const src = fileMeta("source");
     const tgt = fileMeta("target");
+    const mapUi = mapOptionUiHtml(e);
     pane.innerHTML = `
       <div class="detail-head">
         <span class="badge ${escapeHtml(e.category)}">${escapeHtml(categoryLabel(e.category))}</span>
@@ -362,12 +466,195 @@
       <div class="fact-grid">${facts}</div>
       <p class="detail-desc">${escapeHtml(e.detail || "")}</p>
       ${values}
+      ${mapUi}
       <div class="dual file-dual">
         ${filePanelHtml("Source", "source", src)}
         ${filePanelHtml("Target", "target", tgt)}
       </div>
       ${legend}
     `;
+    bindMapOptionUi(e);
+  }
+
+  function canMapOption(entry) {
+    return (
+      (entry.category === "missing" || entry.category === "extra") &&
+      entry.entity?.kind === "option" &&
+      !!optionRefFromEntry(entry)
+    );
+  }
+
+  function mapOptionUiHtml(entry) {
+    if (!canMapOption(entry)) return "";
+    const open = state.mapOptionOpen;
+    const toggleLabel = open ? "Hide mapping" : "Map Option";
+    let body = "";
+    if (open) {
+      body = equivalenceFormHtml(entry);
+    }
+    return `<div class="map-option" id="mapOptionUi">
+      <button type="button" class="map-option-toggle" id="mapOptionBtn">${escapeHtml(toggleLabel)}</button>
+      ${body}
+    </div>`;
+  }
+
+  function equivalenceFormHtml(entry) {
+    const ref = optionRefFromEntry(entry);
+    if (!ref) return "";
+    const match = state.suggestionsOpen ? suggestionForEntry(entry) : null;
+    let srcSpace = "";
+    let srcCode = "";
+    let tgtSpace = "";
+    let tgtCode = "";
+    if (entry.category === "missing") {
+      srcSpace = ref.space;
+      srcCode = String(ref.code);
+      if (match) {
+        tgtSpace = match.target.space;
+        tgtCode = String(match.target.code);
+      }
+    } else {
+      tgtSpace = ref.space;
+      tgtCode = String(ref.code);
+      if (match) {
+        srcSpace = match.source.space;
+        srcCode = String(match.source.code);
+      }
+    }
+    const suggestionsBlock = state.suggestionsOpen
+      ? `<div class="equiv-suggestions" id="equivSuggestionsInForm"></div>`
+      : "";
+    return `<div class="equiv-form" id="equivForm">
+      <div class="equiv-form-title">Insert equivalence</div>
+      <div class="equiv-form-grid">
+        <div>
+          <div class="side-label">Source</div>
+          <div class="equiv-side">
+            <input type="text" id="equivSrcSpace" placeholder="space" value="${escapeHtml(srcSpace)}" />
+            <input type="number" id="equivSrcCode" placeholder="code" min="0" value="${escapeHtml(srcCode)}" />
+          </div>
+        </div>
+        <div>
+          <div class="side-label">Target</div>
+          <div class="equiv-side">
+            <input type="text" id="equivTgtSpace" placeholder="space" value="${escapeHtml(tgtSpace)}" />
+            <input type="number" id="equivTgtCode" placeholder="code" min="0" value="${escapeHtml(tgtCode)}" />
+          </div>
+        </div>
+        <button type="button" id="addEquivalenceBtn">Add equivalence</button>
+      </div>
+      <div class="equiv-form-actions">
+        <button type="button" id="suggestEquivalencesBtn">${
+          state.suggestionsOpen ? "Hide suggestions" : "Suggest equivalences"
+        }</button>
+      </div>
+      ${suggestionsBlock}
+      <p class="equiv-form-hint">Adds a confirmed mapping to the YAML above; re-run the diff to apply.</p>
+    </div>`;
+  }
+
+  function bindMapOptionUi(entry) {
+    const toggle = $("mapOptionBtn");
+    if (toggle) {
+      toggle.addEventListener("click", () => {
+        state.mapOptionOpen = !state.mapOptionOpen;
+        if (!state.mapOptionOpen) {
+          state.suggestionsOpen = false;
+        }
+        renderDetailShell();
+        Promise.all(["source", "target"].map((side) => setupFilePane(side, false)));
+      });
+    }
+    bindEquivalenceForm(entry);
+  }
+
+  function bindEquivalenceForm(entry) {
+    const addBtn = $("addEquivalenceBtn");
+    if (addBtn) {
+      addBtn.addEventListener("click", () => {
+        const source = {
+          space: $("equivSrcSpace").value.trim(),
+          code: Number($("equivSrcCode").value),
+        };
+        const target = {
+          space: $("equivTgtSpace").value.trim(),
+          code: Number($("equivTgtCode").value),
+        };
+        if (!insertEquivalence(source, target)) return;
+        $("statusMeta").textContent = "Equivalence added — re-run diff to apply";
+        if (state.suggestionsOpen) {
+          renderEquivalenceSuggestionsInForm();
+        }
+      });
+    }
+    const suggestBtn = $("suggestEquivalencesBtn");
+    if (suggestBtn) {
+      suggestBtn.addEventListener("click", async () => {
+        if (state.suggestionsOpen) {
+          state.suggestionsOpen = false;
+          renderDetailShell();
+          await Promise.all(["source", "target"].map((side) => setupFilePane(side, false)));
+          return;
+        }
+        suggestBtn.disabled = true;
+        suggestBtn.textContent = "Loading…";
+        await fetchEquivalenceSuggestions();
+        state.suggestionsOpen = true;
+        renderDetailShell();
+        await Promise.all(["source", "target"].map((side) => setupFilePane(side, false)));
+        renderEquivalenceSuggestionsInForm();
+      });
+    }
+    if (state.suggestionsOpen) {
+      renderEquivalenceSuggestionsInForm();
+    }
+  }
+
+  function renderEquivalenceSuggestionsInForm() {
+    const box = $("equivSuggestionsInForm");
+    if (!box) return;
+    const pending = (state.suggestions || []).filter(
+      (s) => !equivalenceAlreadyInYaml(s.source, s.target)
+    );
+    if (!pending.length) {
+      box.innerHTML = `<p class="equiv-form-hint">No suggested pairs for this diff (same scope + value on missing/extra).</p>`;
+      return;
+    }
+    box.innerHTML = `
+      <div class="equiv-suggestions-head">
+        <strong>Suggested equivalences</strong>
+        <span class="hint">Same scope + value on missing/extra options</span>
+      </div>
+      <div class="equiv-suggestion-list">
+        ${pending
+          .map((s, i) => {
+            const label = `${formatOptionRef(s.source)} ↔ ${formatOptionRef(s.target)}`;
+            const count =
+              s.count > 1 ? `<span class="count">(${s.count} scopes)</span>` : "";
+            return `<div class="equiv-suggestion-row">
+              <span class="pair">${escapeHtml(label)}</span>
+              ${count}
+              <button type="button" class="add-suggestion" data-i="${i}">Add</button>
+            </div>`;
+          })
+          .join("")}
+      </div>`;
+    box.querySelectorAll(".add-suggestion").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const s = pending[Number(btn.dataset.i)];
+        if (!s) return;
+        if (!insertEquivalence(s.source, s.target)) return;
+        $("statusMeta").textContent = "Equivalence added — re-run diff to apply";
+        // Prefill form fields from the added pair
+        if ($("equivSrcSpace")) {
+          $("equivSrcSpace").value = s.source.space;
+          $("equivSrcCode").value = String(s.source.code);
+          $("equivTgtSpace").value = s.target.space;
+          $("equivTgtCode").value = String(s.target.code);
+        }
+        renderEquivalenceSuggestionsInForm();
+      });
+    });
   }
 
   function filePanelHtml(label, side, meta) {
@@ -527,6 +814,9 @@
         showError(msg, detail.unknowns || []);
         $("statusMeta").textContent = "Diff failed";
         state.jobId = null;
+        state.suggestions = [];
+        state.mapOptionOpen = false;
+        state.suggestionsOpen = false;
         $("workspace").hidden = true;
         $("toolbar").hidden = true;
         return;
@@ -540,6 +830,9 @@
       state.lineCache.clear();
       state.listScrollTop = 0;
       state.selectedEntry = null;
+      state.suggestions = [];
+      state.mapOptionOpen = false;
+      state.suggestionsOpen = false;
       $("aliasRow").hidden = true;
 
       await bootstrapListSelection();
@@ -567,7 +860,7 @@
       showError("Alias needs a name and numeric code.");
       return;
     }
-    const block = `  - source_name: ${JSON.stringify(name)}\n    canonical: { space: ${JSON.stringify(space)}, code: ${code} }\n`;
+    const block = `- source_name: ${JSON.stringify(name)}\n  canonical: { space: ${JSON.stringify(space)}, code: ${code} }\n`;
     let yaml = $("mappingYaml").value;
     if (/^aliases:\s*\[\s*\]\s*$/m.test(yaml)) {
       yaml = yaml.replace(/^aliases:\s*\[\s*\]\s*$/m, `aliases:\n${block}`);
@@ -580,6 +873,63 @@
     }
     $("mappingYaml").value = yaml;
     clearError();
+  }
+
+  function insertEquivalence(source, target) {
+    if (
+      !source?.space ||
+      !target?.space ||
+      Number.isNaN(source.code) ||
+      Number.isNaN(target.code)
+    ) {
+      showError("Equivalence needs source and target space + numeric code.");
+      return false;
+    }
+    if (source.space === target.space && source.code === target.code) {
+      showError("Source and target must differ.");
+      return false;
+    }
+    if (equivalenceAlreadyInYaml(source, target)) {
+      showError("That equivalence is already in the mapping YAML.");
+      return false;
+    }
+    const block =
+      `- source: { space: ${JSON.stringify(source.space)}, code: ${source.code} }\n` +
+      `  target: { space: ${JSON.stringify(target.space)}, code: ${target.code} }\n` +
+      `  confirmed: true\n`;
+    let yaml = $("mappingYaml").value;
+    if (/^equivalences:\s*\[\s*\]\s*$/m.test(yaml)) {
+      yaml = yaml.replace(/^equivalences:\s*\[\s*\]\s*$/m, `equivalences:\n${block}`);
+    } else if (/^equivalences:\s*$/m.test(yaml)) {
+      yaml = yaml.replace(/^equivalences:\s*$/m, `equivalences:\n${block}`);
+    } else if (/^equivalences:/m.test(yaml)) {
+      yaml = yaml.replace(/^(equivalences:\s*\n)/m, `$1${block}`);
+    } else {
+      yaml = `equivalences:\n${block}` + yaml;
+    }
+    $("mappingYaml").value = yaml;
+    const panel = $("mappingPanel");
+    if (panel) panel.open = true;
+    clearError();
+    return true;
+  }
+
+  async function fetchEquivalenceSuggestions() {
+    if (!state.jobId) {
+      state.suggestions = [];
+      return;
+    }
+    try {
+      const res = await fetch(`/api/jobs/${state.jobId}/equivalence-suggestions`);
+      if (!res.ok) {
+        state.suggestions = [];
+        return;
+      }
+      const data = await res.json();
+      state.suggestions = data.suggestions || [];
+    } catch {
+      state.suggestions = [];
+    }
   }
 
   function downloadMapping() {

@@ -7,7 +7,15 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from .diff_runner import DEFAULT_VENDORS, load_default_mapping
-from .jobs import JobError, create_job_from_upload, get_entry, get_job_summary, list_entries, read_lines
+from .jobs import (
+    JobError,
+    create_job_from_upload,
+    get_entry,
+    get_job_summary,
+    list_entries,
+    list_equivalence_suggestions,
+    read_lines,
+)
 
 STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
 
@@ -143,6 +151,14 @@ def job_entries(
 def job_entry(job_id: str, index: int) -> dict:
     try:
         return get_entry(job_id, index)
+    except JobError as exc:
+        _raise_job_error(exc)
+
+
+@app.get("/api/jobs/{job_id}/equivalence-suggestions")
+def job_equivalence_suggestions(job_id: str, limit: int = 50) -> dict:
+    try:
+        return list_equivalence_suggestions(job_id, limit=limit)
     except JobError as exc:
         _raise_job_error(exc)
 

@@ -19,6 +19,7 @@ from app.jobs import (  # noqa: E402
     create_job_from_upload,
     get_entry,
     list_entries,
+    list_equivalence_suggestions,
     load_offsets,
     read_lines,
     write_offsets,
@@ -163,6 +164,153 @@ class EntryPagingTests(unittest.TestCase):
             get_entry(self.job_id, 99)
 
 
+class EquivalenceSuggestionTests(unittest.TestCase):
+    def setUp(self):
+        self._tmpdir = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmpdir.cleanup)
+        os.environ["DHCPDIFF_JOB_DIR"] = self._tmpdir.name
+        import app.jobs as jobs
+
+        jobs._report_cache.clear()
+        jobs._index_cache.clear()
+        self.job_id = "equivjob1"
+        self.base = Path(self._tmpdir.name) / self.job_id
+        self.base.mkdir()
+        (self.base / "meta.json").write_text(
+            json.dumps({"job_id": self.job_id, "created_at": 0, "counts": {"total": 0}}),
+            encoding="utf-8",
+        )
+        (self.base / "source.conf").write_bytes(b"x\n")
+        (self.base / "target.conf").write_bytes(b"x\n")
+        write_offsets(self.base / "source.offsets", [0])
+        write_offsets(self.base / "target.offsets", [0])
+
+    def _write_entries(self, entries: list) -> None:
+        import app.jobs as jobs
+
+        (self.base / "report.json").write_text(
+            json.dumps({"entries": entries, "counts": {"total": len(entries)}}),
+            encoding="utf-8",
+        )
+        jobs._report_cache.clear()
+
+    def test_pairs_same_scope_and_value(self):
+        self._write_entries(
+            [
+                {
+                    "category": "missing",
+                    "entity": {
+                        "kind": "option",
+                        "key": "global:MSFT50:1 (foo)",
+                        "display": {"object_type": "Option", "name": "MSFT50:1 (foo)"},
+                    },
+                    "detail": 'option MSFT50:1 (foo) = String("bar") missing in target',
+                },
+                {
+                    "category": "extra",
+                    "entity": {
+                        "kind": "option",
+                        "key": "global:Microsoft-Windows-Options:1 (foo)",
+                        "display": {
+                            "object_type": "Option",
+                            "name": "Microsoft-Windows-Options:1 (foo)",
+                        },
+                    },
+                    "detail": 'option Microsoft-Windows-Options:1 (foo) = String("bar") extra in target',
+                },
+            ]
+        )
+        out = list_equivalence_suggestions(self.job_id)
+        self.assertEqual(out["total"], 1)
+        s = out["suggestions"][0]
+        self.assertEqual(s["source"], {"space": "MSFT50", "code": 1})
+        self.assertEqual(s["target"], {"space": "Microsoft-Windows-Options", "code": 1})
+        self.assertEqual(s["count"], 1)
+
+    def test_aggregates_count_across_scopes(self):
+        val = 'String("x")'
+        self._write_entries(
+            [
+                {
+                    "category": "missing",
+                    "entity": {"kind": "option", "key": "10.0.0.0/24:MSFT50:2"},
+                    "detail": f"option MSFT50:2 = {val} missing in target",
+                },
+                {
+                    "category": "extra",
+                    "entity": {
+                        "kind": "option",
+                        "key": "10.0.0.0/24:Microsoft-Windows-Options:2",
+                    },
+                    "detail": f"option Microsoft-Windows-Options:2 = {val} extra in target",
+                },
+                {
+                    "category": "missing",
+                    "entity": {"kind": "option", "key": "10.0.1.0/24:MSFT50:2"},
+                    "detail": f"option MSFT50:2 = {val} missing in target",
+                },
+                {
+                    "category": "extra",
+                    "entity": {
+                        "kind": "option",
+                        "key": "10.0.1.0/24:Microsoft-Windows-Options:2",
+                    },
+                    "detail": f"option Microsoft-Windows-Options:2 = {val} extra in target",
+                },
+            ]
+        )
+        out = list_equivalence_suggestions(self.job_id)
+        self.assertEqual(out["total"], 1)
+        self.assertEqual(out["suggestions"][0]["count"], 2)
+
+    def test_skips_mismatched_value_and_non_options(self):
+        self._write_entries(
+            [
+                {
+                    "category": "missing",
+                    "entity": {"kind": "option", "key": "global:MSFT50:1"},
+                    "detail": 'option MSFT50:1 = String("a") missing in target',
+                },
+                {
+                    "category": "extra",
+                    "entity": {"kind": "option", "key": "global:Microsoft-Windows-Options:1"},
+                    "detail": 'option Microsoft-Windows-Options:1 = String("b") extra in target',
+                },
+                {
+                    "category": "missing",
+                    "entity": {"kind": "subnet", "key": "10.0.0.0/24"},
+                    "detail": "missing",
+                },
+                {
+                    "category": "extra",
+                    "entity": {"kind": "subnet", "key": "10.0.1.0/24"},
+                    "detail": "extra",
+                },
+            ]
+        )
+        out = list_equivalence_suggestions(self.job_id)
+        self.assertEqual(out["total"], 0)
+        self.assertEqual(out["suggestions"], [])
+
+    def test_skips_identical_space_code(self):
+        self._write_entries(
+            [
+                {
+                    "category": "missing",
+                    "entity": {"kind": "option", "key": "global:dhcp:6"},
+                    "detail": "option dhcp:6 = IpList([1.1.1.1]) missing in target",
+                },
+                {
+                    "category": "extra",
+                    "entity": {"kind": "option", "key": "global:dhcp:6"},
+                    "detail": "option dhcp:6 = IpList([1.1.1.1]) extra in target",
+                },
+            ]
+        )
+        out = list_equivalence_suggestions(self.job_id)
+        self.assertEqual(out["total"], 0)
+
+
 class CreateJobApiTests(unittest.TestCase):
     def setUp(self):
         self._tmpdir = tempfile.TemporaryDirectory()
@@ -288,6 +436,11 @@ class FastApiJobsTests(unittest.TestCase):
         payload = lines.json()
         self.assertGreaterEqual(payload["line_count"], 1)
         self.assertTrue(payload["lines"])
+
+        sug = self.client.get(f"/api/jobs/{job_id}/equivalence-suggestions")
+        self.assertEqual(sug.status_code, 200)
+        self.assertIn("suggestions", sug.json())
+        self.assertIn("total", sug.json())
 
 
 if __name__ == "__main__":

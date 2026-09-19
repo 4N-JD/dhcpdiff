@@ -13,7 +13,11 @@ from pathlib import Path
 from typing import Any
 
 from .diff_runner import DiffRunResult, run_diff
-from .entity_display import enrich_entries_with_display
+from .entity_display import (
+    enrich_entries_with_display,
+    parse_option_detail_value,
+    parse_option_scope_and_ref,
+)
 
 OFFSET_FMT = "<Q"
 OFFSET_SIZE = struct.calcsize(OFFSET_FMT)
@@ -364,6 +368,72 @@ def get_entry(job_id: str, index: int) -> dict[str, Any]:
     entry = dict(entries[index])
     entry["index"] = index
     return entry
+
+
+SUGGESTION_CAP = 50
+
+
+def list_equivalence_suggestions(job_id: str, *, limit: int = SUGGESTION_CAP) -> dict[str, Any]:
+    """Suggest source↔target equivalences from paired missing/extra option diffs.
+
+    Pairing rule: same scope + identical detail value + different (space, code);
+    missing → source, extra → target. Aggregated by unique (source, target).
+    """
+    if limit < 1:
+        limit = 1
+    if limit > SUGGESTION_CAP:
+        limit = SUGGESTION_CAP
+
+    report = load_report(job_id)
+    entries = report.get("entries") or []
+
+    # group key: (scope, value) -> {"missing": [...], "extra": [...]}
+    groups: dict[tuple[str, str], dict[str, list[dict[str, Any]]]] = {}
+    for entry in entries:
+        category = entry.get("category")
+        if category not in ("missing", "extra"):
+            continue
+        entity = entry.get("entity") or {}
+        if entity.get("kind") != "option":
+            continue
+        ref = parse_option_scope_and_ref(entity.get("key") or "")
+        if not ref:
+            continue
+        value = parse_option_detail_value(entry.get("detail") or "")
+        if value is None:
+            continue
+        bucket = groups.setdefault((ref["scope"], value), {"missing": [], "extra": []})
+        bucket[category].append(ref)
+
+    # Aggregate unique (source, target) with counts and example labels
+    agg: dict[tuple[str, int, str, int], dict[str, Any]] = {}
+    for (_scope, _value), sides in groups.items():
+        for src in sides["missing"]:
+            for tgt in sides["extra"]:
+                if src["space"] == tgt["space"] and src["code"] == tgt["code"]:
+                    continue
+                key = (src["space"], src["code"], tgt["space"], tgt["code"])
+                item = agg.get(key)
+                if item is None:
+                    agg[key] = {
+                        "source": {"space": src["space"], "code": src["code"]},
+                        "target": {"space": tgt["space"], "code": tgt["code"]},
+                        "count": 1,
+                        "example_source": src["label"],
+                        "example_target": tgt["label"],
+                    }
+                else:
+                    item["count"] += 1
+
+    suggestions = sorted(
+        agg.values(),
+        key=lambda s: (-s["count"], s["source"]["space"], s["source"]["code"]),
+    )
+    total = len(suggestions)
+    return {
+        "total": total,
+        "suggestions": suggestions[:limit],
+    }
 
 
 def read_lines(job_id: str, side: str, start: int, end: int) -> dict[str, Any]:

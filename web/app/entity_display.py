@@ -135,6 +135,68 @@ def _peel_option_suffix(key: str) -> tuple[str, str] | None:
     return scope, option
 
 
+def parse_option_space_code(key_or_name: str) -> dict[str, Any] | None:
+    """Extract {space, code} from an option label or full entity key."""
+    text = (key_or_name or "").strip()
+    if not text:
+        return None
+    # Prefer peeling from a full key (scope:space:code …); fall back to label alone.
+    peeled = _peel_option_suffix(text)
+    label = peeled[1] if peeled else text
+    return _space_code_from_label(label)
+
+
+def parse_option_scope_and_ref(key: str) -> dict[str, Any] | None:
+    """Return {scope, space, code, label} for an option entity key, or None."""
+    text = (key or "").strip()
+    if not text:
+        return None
+    scope, option_name, _vci = _split_option_key(text)
+    ref = _space_code_from_label(option_name)
+    if not ref:
+        return None
+    return {
+        "scope": scope or "global",
+        "space": ref["space"],
+        "code": ref["code"],
+        "label": option_name,
+    }
+
+
+def _space_code_from_label(label: str) -> dict[str, Any] | None:
+    """Parse `space:code` or `space:code (name)` into {space, code}."""
+    text = (label or "").strip()
+    if not text:
+        return None
+    without_name = text
+    paren = without_name.rfind(" (")
+    if paren >= 0 and without_name.endswith(")"):
+        without_name = without_name[:paren]
+    if ":" not in without_name:
+        return None
+    space, code_s = without_name.rsplit(":", 1)
+    space = space.strip()
+    code_s = code_s.strip()
+    if not space or not code_s.isdigit():
+        return None
+    return {"space": space, "code": int(code_s)}
+
+
+def parse_option_detail_value(detail: str) -> str | None:
+    """Extract the value portion from missing/extra option detail strings."""
+    text = (detail or "").strip()
+    if not text:
+        return None
+    for suffix in (" missing in target", " extra in target"):
+        if text.endswith(suffix):
+            head = text[: -len(suffix)]
+            eq = head.find(" = ")
+            if eq < 0:
+                return None
+            return head[eq + 3 :]
+    return None
+
+
 def _describe_option_scope(scope: str, option_name: str) -> tuple[str, str, str | None, str]:
     name = option_name or "option"
     if not scope or scope == "global":
