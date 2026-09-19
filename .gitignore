@@ -19,3 +19,6 @@ example_*.conf
 /test-ibx.conf
 /test-qip.conf
 /*.dhcpd.conf
+
+# Docker image export (./build-web-image.sh)
+/dhcpdiff-web.tar.gz
