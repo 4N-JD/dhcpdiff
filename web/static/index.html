@@ -28,8 +28,7 @@
         <select id="targetVendor" aria-label="Target vendor"></select>
       </div>
       <div class="field toggles">
-        <label class="check"><input type="checkbox" id="ignoreUnmapped" checked /> Ignore unmapped options</label>
-        <label class="check"><input type="checkbox" id="ignoreSubnetMask" checked /> Ignore subnet-mask (option 1)</label>
+        <label class="check"><input type="checkbox" id="ignoreUnmapped"/> Ignore unmapped options</label>
       </div>
       <div class="field actions">
         <button type="button" class="primary" id="runBtn">Run Diff</button>
@@ -37,9 +36,8 @@
     </div>
 
     <details class="mapping" id="mappingPanel" open>
-      <summary>Option mapping (user.yaml)</summary>
+      <summary>Option mapping</summary>
       <div class="mapping-body">
-        <p class="hint">Replaces the interactive <code>dhcpdiff map</code> TUI. Edit YAML, or add an alias from an unknown option below.</p>
         <div class="alias-row" id="aliasRow" hidden>
           <strong>Unknowns detected</strong>
           <ul id="unknownList"></ul>
@@ -50,8 +48,10 @@
             <button type="button" id="addAliasBtn">Add alias</button>
           </div>
         </div>
-        <textarea id="mappingYaml" spellcheck="false" rows="10"></textarea>
+        <div class="mapping-editor" id="mappingEditor"></div>
         <div class="mapping-actions">
+          <button type="button" id="loadMappingBtn">Load YAML</button>
+          <input type="file" id="loadMappingFile" accept=".yaml,.yml,text/yaml,text/plain" hidden />
           <button type="button" id="downloadMappingBtn">Download YAML</button>
           <button type="button" id="resetMappingBtn">Reset to default</button>
         </div>

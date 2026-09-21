@@ -211,7 +211,6 @@ def create_job_from_upload(
     source_vendor: str,
     target_vendor: str,
     ignore_unmapped: bool,
-    ignore_subnet_mask: bool,
 ) -> JobSummary:
     cleanup_expired_jobs()
 
@@ -239,7 +238,6 @@ def create_job_from_upload(
         target_vendor=target_vendor,
         mapping_path=mapping_path,
         ignore_unmapped=ignore_unmapped,
-        ignore_subnet_mask=ignore_subnet_mask,
     )
 
     if not result.ok:

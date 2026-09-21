@@ -11,10 +11,7 @@ pub mod mappings;
 pub mod scenario;
 
 #[derive(Debug, Clone, Default)]
-pub struct ResolverOptions {
-    /// Override `ignore_subnet_mask` from the mapping file. Defaults to true when unset.
-    pub ignore_subnet_mask: Option<bool>,
-}
+pub struct ResolverOptions {}
 
 #[derive(Debug, Clone, Default)]
 pub struct OptionResolver {
@@ -22,10 +19,6 @@ pub struct OptionResolver {
     aliases: BTreeMap<String, OptionKey>,
     equivalences: Vec<Equivalence>,
     ignore: BTreeSet<OptionKey>,
-}
-
-fn subnet_mask_key() -> OptionKey {
-    OptionKey::dhcp(1)
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -62,33 +55,19 @@ pub struct UnknownOption {
 impl OptionResolver {
     pub fn load(
         mapping_path: Option<&std::path::Path>,
-        options: ResolverOptions,
+        _options: ResolverOptions,
     ) -> anyhow::Result<Self> {
         let mut resolver = Self {
             builtin_names: builtin::load_builtin_names(),
             ..Default::default()
         };
-        let mut ignore_subnet_mask = options.ignore_subnet_mask;
         if let Some(path) = mapping_path {
             if path.exists() {
                 let user = mappings::load_user_mappings(path)?;
-                if ignore_subnet_mask.is_none() {
-                    ignore_subnet_mask = user.ignore_subnet_mask;
-                }
                 resolver.apply_user_mappings(user);
             }
         }
-        resolver.set_ignore_subnet_mask(ignore_subnet_mask.unwrap_or(true));
         Ok(resolver)
-    }
-
-    pub fn set_ignore_subnet_mask(&mut self, ignore: bool) {
-        let key = subnet_mask_key();
-        if ignore {
-            self.ignore.insert(key);
-        } else {
-            self.ignore.remove(&key);
-        }
     }
 
     pub fn apply_user_mappings(&mut self, user: mappings::UserMappings) {
@@ -107,6 +86,10 @@ impl OptionResolver {
         }
         for ig in user.ignore {
             self.ignore.insert(OptionKey::qualified(ig.space, ig.code));
+        }
+        // Legacy: ignore_subnet_mask: true → ensure dhcp:1 is ignored.
+        if user.ignore_subnet_mask == Some(true) {
+            self.ignore.insert(OptionKey::dhcp(1));
         }
     }
 

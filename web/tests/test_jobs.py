@@ -351,7 +351,6 @@ class CreateJobApiTests(unittest.TestCase):
                 source_vendor="auto",
                 target_vendor="auto",
                 ignore_unmapped=True,
-                ignore_subnet_mask=True,
             )
         self.assertTrue(summary.job_id)
         self.assertEqual(summary.counts["total"], 1)
@@ -406,8 +405,7 @@ class FastApiJobsTests(unittest.TestCase):
                     "source_vendor": "qip",
                     "target_vendor": "infoblox",
                     "ignore_unmapped": "true",
-                    "ignore_subnet_mask": "true",
-                    "mapping_yaml": "aliases: []\nequivalences: []\nignore: []\n",
+                    "mapping_yaml": "aliases: []\nequivalences: []\nignore:\n- space: dhcp\n  code: 1\n",
                 },
             )
         self.assertEqual(res.status_code, 200, res.text)

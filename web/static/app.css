@@ -162,17 +162,104 @@ button.primary:hover { filter: brightness(1.05); }
   margin: 0 0 0.55rem;
 }
 
-#mappingYaml {
-  width: 100%;
-  font-family: "IBM Plex Mono", ui-monospace, monospace;
-  font-size: 0.75rem;
-  line-height: 1.4;
+.mapping-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.mapping-section {
+  background: #fff;
   border: 1px solid var(--border);
   border-radius: 4px;
-  padding: 0.55rem;
-  resize: vertical;
-  min-height: 120px;
-  background: #fff;
+  padding: 0.55rem 0.65rem;
+}
+
+.mapping-section h3 {
+  margin: 0 0 0.45rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.mapping-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.78rem;
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+}
+
+.mapping-table th,
+.mapping-table td {
+  text-align: left;
+  padding: 0.3rem 0.35rem;
+  border-bottom: 1px solid var(--border);
+  vertical-align: middle;
+}
+
+.mapping-table th {
+  font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
+  font-weight: 500;
+  color: var(--muted);
+  font-size: 0.72rem;
+}
+
+.mapping-table .empty-row td {
+  color: var(--muted);
+  font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
+  font-style: italic;
+}
+
+.mapping-table button.row-del {
+  font-size: 0.72rem;
+  padding: 0.15rem 0.4rem;
+}
+
+.mapping-add {
+  display: grid;
+  gap: 0.35rem;
+  margin-top: 0.45rem;
+  align-items: end;
+}
+
+.mapping-add.aliases {
+  grid-template-columns: 2fr 1fr 5rem 1.5fr auto;
+}
+
+.mapping-add.equivalences {
+  grid-template-columns: 1fr 4.5rem 1fr 4.5rem auto auto;
+}
+
+.mapping-add.ignore {
+  grid-template-columns: 1fr 5rem auto;
+}
+
+.mapping-add input[type="text"],
+.mapping-add input[type="number"] {
+  width: 100%;
+  font-size: 0.78rem;
+  padding: 0.3rem 0.4rem;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+}
+
+.mapping-add .check {
+  font-size: 0.75rem;
+  white-space: nowrap;
+}
+
+.mapping-section .check {
+  display: inline-flex;
+  margin-top: 0.45rem;
+  font-size: 0.8rem;
+}
+
+@media (max-width: 800px) {
+  .mapping-add.aliases,
+  .mapping-add.equivalences,
+  .mapping-add.ignore {
+    grid-template-columns: 1fr;
+  }
 }
 
 .mapping-actions {
@@ -646,6 +733,36 @@ button.primary:hover { filter: brightness(1.05); }
 }
 
 .code-panel.absent { opacity: 0.72; }
+
+.code-panel.parent-context header .side {
+  color: var(--muted);
+}
+
+.parent-scope-banner {
+  padding: 0.35rem 0.7rem;
+  font-size: 0.75rem;
+  color: var(--muted);
+  background: var(--code-bg);
+  border-bottom: 1px solid var(--border);
+}
+
+/* Parent scope is context only — avoid the green “match” highlight */
+.code-panel.parent-context .file-scroll .line.hl-affected {
+  background: #e6e9ee;
+}
+
+.code-panel.parent-context .file-scroll .line.hl-affected .num {
+  border-left-color: #7a8494;
+  color: #4a5563;
+}
+
+.code-panel.parent-context .file-scroll .line.hl-decl.hl-affected {
+  background: linear-gradient(90deg, var(--hl-decl) 0 50%, #e6e9ee 50% 100%);
+}
+
+.code-panel.parent-context .file-scroll .line.focus {
+  outline-color: rgba(122, 132, 148, 0.45);
+}
 
 .file-scroll {
   overflow: auto;

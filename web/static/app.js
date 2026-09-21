@@ -7,6 +7,7 @@
 
   const state = {
     defaults: null,
+    mapping: emptyMapping(),
     jobId: null,
     counts: null,
     files: null,
@@ -24,6 +25,93 @@
   };
 
   const $ = (id) => document.getElementById(id);
+
+  function emptyMapping() {
+    return {
+      aliases: [],
+      equivalences: [],
+      ignore: [],
+    };
+  }
+
+  function normalizeMapping(raw) {
+    const m = emptyMapping();
+    if (!raw || typeof raw !== "object") return m;
+    m.aliases = Array.isArray(raw.aliases)
+      ? raw.aliases
+          .filter((a) => a && a.source_name && a.canonical?.space != null && a.canonical?.code != null)
+          .map((a) => ({
+            source_name: String(a.source_name),
+            canonical: { space: String(a.canonical.space), code: Number(a.canonical.code) },
+            ...(a.note ? { note: String(a.note) } : {}),
+          }))
+      : [];
+    m.equivalences = Array.isArray(raw.equivalences)
+      ? raw.equivalences
+          .filter((e) => e?.source?.space != null && e?.target?.space != null)
+          .map((e) => ({
+            source: { space: String(e.source.space), code: Number(e.source.code) },
+            target: { space: String(e.target.space), code: Number(e.target.code) },
+            confirmed: !!e.confirmed,
+          }))
+      : [];
+    m.ignore = Array.isArray(raw.ignore)
+      ? raw.ignore
+          .filter((i) => i?.space != null && i?.code != null)
+          .map((i) => ({ space: String(i.space), code: Number(i.code) }))
+      : [];
+    // Legacy flag from older defaults payloads
+    if (raw.ignore_subnet_mask === true) {
+      const has = m.ignore.some((i) => i.space === "dhcp" && i.code === 1);
+      if (!has) m.ignore.push({ space: "dhcp", code: 1 });
+    }
+    return m;
+  }
+
+  function yamlQuote(s) {
+    return JSON.stringify(String(s));
+  }
+
+  function serializeMappingYaml(mapping) {
+    const m = normalizeMapping(mapping);
+    const out = [];
+    if (!m.aliases.length) {
+      out.push("aliases: []");
+    } else {
+      out.push("aliases:");
+      for (const a of m.aliases) {
+        out.push(`- source_name: ${yamlQuote(a.source_name)}`);
+        out.push(
+          `  canonical: { space: ${yamlQuote(a.canonical.space)}, code: ${a.canonical.code} }`
+        );
+        if (a.note) out.push(`  note: ${yamlQuote(a.note)}`);
+      }
+    }
+    if (!m.equivalences.length) {
+      out.push("equivalences: []");
+    } else {
+      out.push("equivalences:");
+      for (const e of m.equivalences) {
+        out.push(
+          `- source: { space: ${yamlQuote(e.source.space)}, code: ${e.source.code} }`
+        );
+        out.push(
+          `  target: { space: ${yamlQuote(e.target.space)}, code: ${e.target.code} }`
+        );
+        out.push(`  confirmed: ${e.confirmed ? "true" : "false"}`);
+      }
+    }
+    if (!m.ignore.length) {
+      out.push("ignore: []");
+    } else {
+      out.push("ignore:");
+      for (const i of m.ignore) {
+        out.push(`- space: ${yamlQuote(i.space)}`);
+        out.push(`  code: ${i.code}`);
+      }
+    }
+    return out.join("\n") + "\n";
+  }
 
   function escapeHtml(s) {
     return String(s)
@@ -119,23 +207,14 @@
     return `${ref.space}:${ref.code}`;
   }
 
-  function equivalenceAlreadyInYaml(source, target) {
-    const yaml = $("mappingYaml")?.value || "";
-    if (!yaml) return false;
-    // Heuristic: both space/code pairs appear near each other under equivalences.
-    const srcPat = new RegExp(
-      `space:\\s*["']?${escapeRegex(source.space)}["']?[\\s\\S]{0,80}?code:\\s*${source.code}`
+  function equivalenceAlreadyMapped(source, target) {
+    return (state.mapping.equivalences || []).some(
+      (e) =>
+        e.source.space === source.space &&
+        e.source.code === source.code &&
+        e.target.space === target.space &&
+        e.target.code === target.code
     );
-    const tgtPat = new RegExp(
-      `space:\\s*["']?${escapeRegex(target.space)}["']?[\\s\\S]{0,80}?code:\\s*${target.code}`
-    );
-    const eqIdx = yaml.search(/^equivalences:/m);
-    const slice = eqIdx >= 0 ? yaml.slice(eqIdx) : yaml;
-    return srcPat.test(slice) && tgtPat.test(slice);
-  }
-
-  function escapeRegex(s) {
-    return String(s).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   }
 
   function suggestionForEntry(entry) {
@@ -165,9 +244,172 @@
     state.defaults = await res.json();
     fillVendors($("sourceVendor"), state.defaults.vendors, "auto");
     fillVendors($("targetVendor"), state.defaults.vendors, "auto");
-    $("mappingYaml").value = state.defaults.mapping_yaml || "";
+    applyMapping(state.defaults.mapping || emptyMapping());
     $("ignoreUnmapped").checked = !!state.defaults.ignore_unmapped;
-    $("ignoreSubnetMask").checked = !!state.defaults.ignore_subnet_mask;
+  }
+
+  function applyMapping(raw) {
+    state.mapping = normalizeMapping(raw);
+    renderMappingEditor();
+  }
+
+  function renderMappingEditor() {
+    const root = $("mappingEditor");
+    if (!root) return;
+    const m = state.mapping;
+    const aliasRows = m.aliases.length
+      ? m.aliases
+          .map(
+            (a, i) => `<tr>
+          <td>${escapeHtml(a.source_name)}</td>
+          <td>${escapeHtml(a.canonical.space)}</td>
+          <td>${a.canonical.code}</td>
+          <td>${escapeHtml(a.note || "")}</td>
+          <td><button type="button" class="row-del" data-kind="alias" data-i="${i}">Remove</button></td>
+        </tr>`
+          )
+          .join("")
+      : `<tr class="empty-row"><td colspan="5">No aliases</td></tr>`;
+    const equivRows = m.equivalences.length
+      ? m.equivalences
+          .map(
+            (e, i) => `<tr>
+          <td>${escapeHtml(e.source.space)}</td>
+          <td>${e.source.code}</td>
+          <td>${escapeHtml(e.target.space)}</td>
+          <td>${e.target.code}</td>
+          <td>${e.confirmed ? "yes" : "no"}</td>
+          <td><button type="button" class="row-del" data-kind="equiv" data-i="${i}">Remove</button></td>
+        </tr>`
+          )
+          .join("")
+      : `<tr class="empty-row"><td colspan="6">No equivalences</td></tr>`;
+    const ignoreRows = m.ignore.length
+      ? m.ignore
+          .map(
+            (ig, i) => `<tr>
+          <td>${escapeHtml(ig.space)}</td>
+          <td>${ig.code}</td>
+          <td><button type="button" class="row-del" data-kind="ignore" data-i="${i}">Remove</button></td>
+        </tr>`
+          )
+          .join("")
+      : `<tr class="empty-row"><td colspan="3">No ignore rules</td></tr>`;
+
+    root.innerHTML = `
+      <section class="mapping-section">
+        <h3>Aliases</h3>
+        <table class="mapping-table">
+          <thead><tr><th>Name</th><th>Space</th><th>Code</th><th>Note</th><th></th></tr></thead>
+          <tbody>${aliasRows}</tbody>
+        </table>
+        <div class="mapping-add aliases">
+          <input type="text" id="mapAliasName" placeholder="option name" />
+          <input type="text" id="mapAliasSpace" placeholder="space" value="dhcp" />
+          <input type="number" id="mapAliasCode" placeholder="code" min="0" />
+          <input type="text" id="mapAliasNote" placeholder="note (optional)" />
+          <button type="button" id="mapAddAliasBtn">Add</button>
+        </div>
+      </section>
+      <section class="mapping-section">
+        <h3>Equivalences</h3>
+        <table class="mapping-table">
+          <thead><tr><th>Src space</th><th>Code</th><th>Tgt space</th><th>Code</th><th>Confirmed</th><th></th></tr></thead>
+          <tbody>${equivRows}</tbody>
+        </table>
+        <div class="mapping-add equivalences">
+          <input type="text" id="mapEqSrcSpace" placeholder="source space" />
+          <input type="number" id="mapEqSrcCode" placeholder="code" min="0" />
+          <input type="text" id="mapEqTgtSpace" placeholder="target space" />
+          <input type="number" id="mapEqTgtCode" placeholder="code" min="0" />
+          <label class="check"><input type="checkbox" id="mapEqConfirmed" checked /> confirmed</label>
+          <button type="button" id="mapAddEquivBtn">Add</button>
+        </div>
+      </section>
+      <section class="mapping-section">
+        <h3>Ignore</h3>
+        <table class="mapping-table">
+          <thead><tr><th>Space</th><th>Code</th><th></th></tr></thead>
+          <tbody>${ignoreRows}</tbody>
+        </table>
+        <div class="mapping-add ignore">
+          <input type="text" id="mapIgnoreSpace" placeholder="space" value="dhcp" />
+          <input type="number" id="mapIgnoreCode" placeholder="code" min="0" />
+          <button type="button" id="mapAddIgnoreBtn">Add</button>
+        </div>
+      </section>`;
+    bindMappingEditor();
+  }
+
+  function bindMappingEditor() {
+    $("mappingEditor")?.querySelectorAll(".row-del").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const kind = btn.dataset.kind;
+        const i = Number(btn.dataset.i);
+        if (kind === "alias") state.mapping.aliases.splice(i, 1);
+        else if (kind === "equiv") state.mapping.equivalences.splice(i, 1);
+        else if (kind === "ignore") state.mapping.ignore.splice(i, 1);
+        renderMappingEditor();
+      });
+    });
+    $("mapAddAliasBtn")?.addEventListener("click", () => {
+      const name = $("mapAliasName").value.trim();
+      const space = $("mapAliasSpace").value.trim() || "dhcp";
+      const code = Number($("mapAliasCode").value);
+      const note = $("mapAliasNote").value.trim();
+      if (!name || Number.isNaN(code)) {
+        showError("Alias needs a name and numeric code.");
+        return;
+      }
+      addAliasToModel(name, space, code, note || null);
+    });
+    $("mapAddEquivBtn")?.addEventListener("click", () => {
+      const source = {
+        space: $("mapEqSrcSpace").value.trim(),
+        code: Number($("mapEqSrcCode").value),
+      };
+      const target = {
+        space: $("mapEqTgtSpace").value.trim(),
+        code: Number($("mapEqTgtCode").value),
+      };
+      const confirmed = $("mapEqConfirmed").checked;
+      if (!insertEquivalence(source, target, confirmed)) return;
+      $("mapEqSrcSpace").value = "";
+      $("mapEqSrcCode").value = "";
+      $("mapEqTgtSpace").value = "";
+      $("mapEqTgtCode").value = "";
+    });
+    $("mapAddIgnoreBtn")?.addEventListener("click", () => {
+      const space = $("mapIgnoreSpace").value.trim();
+      const code = Number($("mapIgnoreCode").value);
+      if (!space || Number.isNaN(code)) {
+        showError("Ignore needs space and numeric code.");
+        return;
+      }
+      if (state.mapping.ignore.some((ig) => ig.space === space && ig.code === code)) {
+        showError("That ignore rule is already in the mapping.");
+        return;
+      }
+      state.mapping.ignore.push({ space, code });
+      clearError();
+      renderMappingEditor();
+    });
+  }
+
+  function addAliasToModel(name, space, code, note) {
+    const exists = state.mapping.aliases.some(
+      (a) => a.source_name === name && a.canonical.space === space && a.canonical.code === code
+    );
+    if (exists) {
+      showError("That alias is already in the mapping.");
+      return false;
+    }
+    const entry = { source_name: name, canonical: { space, code } };
+    if (note) entry.note = note;
+    state.mapping.aliases.push(entry);
+    clearError();
+    renderMappingEditor();
+    return true;
   }
 
   function showError(msg, unknowns) {
@@ -614,7 +856,7 @@
     const box = $("equivSuggestionsInForm");
     if (!box) return;
     const pending = (state.suggestions || []).filter(
-      (s) => !equivalenceAlreadyInYaml(s.source, s.target)
+      (s) => !equivalenceAlreadyMapped(s.source, s.target)
     );
     if (!pending.length) {
       box.innerHTML = `<p class="equiv-form-hint">No suggested pairs for this diff (same scope + value on missing/extra).</p>`;
@@ -658,7 +900,11 @@
   }
 
   function filePanelHtml(label, side, meta) {
-    const hl = sideHighlights(state.selectedEntry?.locations?.[side]);
+    const entry = state.selectedEntry;
+    const hl = sideHighlights(entry?.locations?.[side]);
+    const isAbsentSide =
+      (entry?.category === "missing" && side === "target") ||
+      (entry?.category === "extra" && side === "source");
     if (!hl.affected && !hl.declaration) {
       return `<div class="code-panel absent">
         <header><span class="side">${escapeHtml(label)}</span><span>${escapeHtml(meta.name || side)}</span></header>
@@ -669,11 +915,15 @@
     if (hl.declaration) parts.push(`declared ${hl.declaration.start}–${hl.declaration.end}`);
     if (hl.affected) parts.push(`affects ${hl.affected.start}–${hl.affected.end}`);
     const lineCount = meta.line_count || 0;
-    return `<div class="code-panel">
+    const parentBanner = isAbsentSide
+      ? `<div class="parent-scope-banner">Not present here — showing parent scope</div>`
+      : "";
+    return `<div class="code-panel${isAbsentSide ? " parent-context" : ""}">
       <header>
         <span class="side">${escapeHtml(label)}</span>
         <span>${escapeHtml(meta.name || side)} · ${escapeHtml(parts.join(" · "))}</span>
       </header>
+      ${parentBanner}
       <div class="file-scroll virt-file" data-side="${escapeHtml(side)}" data-lines="${lineCount}">
         <div class="virt-spacer" style="height:${lineCount * LINE_H}px">
           <div class="virt-window file-window"></div>
@@ -799,9 +1049,8 @@
       fd.append("target", target);
       fd.append("source_vendor", $("sourceVendor").value);
       fd.append("target_vendor", $("targetVendor").value);
-      fd.append("mapping_yaml", $("mappingYaml").value);
+      fd.append("mapping_yaml", serializeMappingYaml(state.mapping));
       fd.append("ignore_unmapped", $("ignoreUnmapped").checked ? "true" : "false");
-      fd.append("ignore_subnet_mask", $("ignoreSubnetMask").checked ? "true" : "false");
 
       const res = await fetch("/api/jobs", { method: "POST", body: fd });
       const data = await res.json().catch(() => ({}));
@@ -860,22 +1109,12 @@
       showError("Alias needs a name and numeric code.");
       return;
     }
-    const block = `- source_name: ${JSON.stringify(name)}\n  canonical: { space: ${JSON.stringify(space)}, code: ${code} }\n`;
-    let yaml = $("mappingYaml").value;
-    if (/^aliases:\s*\[\s*\]\s*$/m.test(yaml)) {
-      yaml = yaml.replace(/^aliases:\s*\[\s*\]\s*$/m, `aliases:\n${block}`);
-    } else if (/^aliases:\s*$/m.test(yaml)) {
-      yaml = yaml.replace(/^aliases:\s*$/m, `aliases:\n${block}`);
-    } else if (/^aliases:/m.test(yaml)) {
-      yaml = yaml.replace(/^(aliases:\s*\n)/m, `$1${block}`);
-    } else {
-      yaml = `aliases:\n${block}` + yaml;
-    }
-    $("mappingYaml").value = yaml;
-    clearError();
+    if (!addAliasToModel(name, space, code, null)) return;
+    const panel = $("mappingPanel");
+    if (panel) panel.open = true;
   }
 
-  function insertEquivalence(source, target) {
+  function insertEquivalence(source, target, confirmed = true) {
     if (
       !source?.space ||
       !target?.space ||
@@ -889,28 +1128,19 @@
       showError("Source and target must differ.");
       return false;
     }
-    if (equivalenceAlreadyInYaml(source, target)) {
-      showError("That equivalence is already in the mapping YAML.");
+    if (equivalenceAlreadyMapped(source, target)) {
+      showError("That equivalence is already in the mapping.");
       return false;
     }
-    const block =
-      `- source: { space: ${JSON.stringify(source.space)}, code: ${source.code} }\n` +
-      `  target: { space: ${JSON.stringify(target.space)}, code: ${target.code} }\n` +
-      `  confirmed: true\n`;
-    let yaml = $("mappingYaml").value;
-    if (/^equivalences:\s*\[\s*\]\s*$/m.test(yaml)) {
-      yaml = yaml.replace(/^equivalences:\s*\[\s*\]\s*$/m, `equivalences:\n${block}`);
-    } else if (/^equivalences:\s*$/m.test(yaml)) {
-      yaml = yaml.replace(/^equivalences:\s*$/m, `equivalences:\n${block}`);
-    } else if (/^equivalences:/m.test(yaml)) {
-      yaml = yaml.replace(/^(equivalences:\s*\n)/m, `$1${block}`);
-    } else {
-      yaml = `equivalences:\n${block}` + yaml;
-    }
-    $("mappingYaml").value = yaml;
+    state.mapping.equivalences.push({
+      source: { space: source.space, code: source.code },
+      target: { space: target.space, code: target.code },
+      confirmed: !!confirmed,
+    });
     const panel = $("mappingPanel");
     if (panel) panel.open = true;
     clearError();
+    renderMappingEditor();
     return true;
   }
 
@@ -933,7 +1163,7 @@
   }
 
   function downloadMapping() {
-    const blob = new Blob([$("mappingYaml").value], { type: "text/yaml" });
+    const blob = new Blob([serializeMappingYaml(state.mapping)], { type: "text/yaml" });
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
     a.download = "user.yaml";
@@ -941,11 +1171,44 @@
     URL.revokeObjectURL(a.href);
   }
 
+  async function loadMappingFromFile(file) {
+    if (!file) return;
+    const fd = new FormData();
+    fd.append("file", file, file.name || "user.yaml");
+    try {
+      const res = await fetch("/api/mapping/parse", { method: "POST", body: fd });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        const detail = data.detail || data;
+        const msg =
+          typeof detail === "string"
+            ? detail
+            : detail.message || detail.error || JSON.stringify(detail);
+        showError(msg);
+        return;
+      }
+      applyMapping(data.mapping || emptyMapping());
+      clearError();
+      $("statusMeta").textContent = `Loaded mapping from ${file.name}`;
+      const panel = $("mappingPanel");
+      if (panel) panel.open = true;
+    } catch (err) {
+      showError(String(err));
+    }
+  }
+
   $("runBtn").addEventListener("click", runDiff);
   $("addAliasBtn").addEventListener("click", addAlias);
+  $("loadMappingBtn").addEventListener("click", () => $("loadMappingFile").click());
+  $("loadMappingFile").addEventListener("change", async (ev) => {
+    const file = ev.target.files?.[0];
+    ev.target.value = "";
+    await loadMappingFromFile(file);
+  });
   $("downloadMappingBtn").addEventListener("click", downloadMapping);
   $("resetMappingBtn").addEventListener("click", () => {
-    if (state.defaults) $("mappingYaml").value = state.defaults.mapping_yaml || "";
+    if (!state.defaults) return;
+    applyMapping(state.defaults.mapping || emptyMapping());
   });
 
   loadDefaults().catch((e) => showError(String(e)));

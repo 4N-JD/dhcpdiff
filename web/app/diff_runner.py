@@ -15,8 +15,9 @@ DEFAULT_VENDORS = ["auto", "qip", "infoblox", "bluecat", "microsoft"]
 
 DEFAULT_MAPPING_YAML = """aliases: []
 equivalences: []
-ignore: []
-ignore_subnet_mask: true
+ignore:
+- space: dhcp
+  code: 1
 """
 
 
@@ -62,7 +63,6 @@ def run_diff(
     target_vendor: str,
     mapping_path: Path,
     ignore_unmapped: bool,
-    ignore_subnet_mask: bool,
     timeout: float = 600.0,
 ) -> DiffRunResult:
     cmd = [
@@ -80,8 +80,6 @@ def run_diff(
         str(mapping_path),
         "--format",
         "json",
-        "--ignore-subnet-mask",
-        "true" if ignore_subnet_mask else "false",
     ]
     if ignore_unmapped:
         cmd.append("--ignore-unmapped")

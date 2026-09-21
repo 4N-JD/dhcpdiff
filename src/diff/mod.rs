@@ -367,7 +367,7 @@ fn diff_subnet(
             entries.push(DiffEntry::MissingInTarget {
                 entity: entity("pool", &format!("{cidr}:{k}")),
                 detail: format!("pool {k} missing in target"),
-                locations: DiffLocations::source_only(loc_of(&p.source)),
+                locations: DiffLocations::both(loc_of(&p.source), loc_of(&target.source)),
             });
         } else {
             let tgt_pool = tgt_pools[k];
@@ -395,7 +395,7 @@ fn diff_subnet(
             entries.push(DiffEntry::ExtraInTarget {
                 entity: entity("pool", &format!("{cidr}:{k}")),
                 detail: format!("pool {k} extra in target"),
-                locations: DiffLocations::target_only(loc_of(&p.source)),
+                locations: DiffLocations::both(loc_of(&source.source), loc_of(&p.source)),
             });
         }
     }
@@ -416,7 +416,7 @@ fn diff_subnet(
             entries.push(DiffEntry::MissingInTarget {
                 entity: entity("filter", &format!("{cidr}:{k}")),
                 detail: format!("filter {k} missing in target"),
-                locations: DiffLocations::source_only(loc_of(&f.source)),
+                locations: DiffLocations::both(loc_of(&f.source), loc_of(&target.source)),
             });
         } else {
             let t = tgt_f[k];
@@ -442,7 +442,7 @@ fn diff_subnet(
             entries.push(DiffEntry::ExtraInTarget {
                 entity: entity("filter", &format!("{cidr}:{k}")),
                 detail: format!("filter {k} extra in target"),
-                locations: DiffLocations::target_only(loc_of(&f.source)),
+                locations: DiffLocations::both(loc_of(&source.source), loc_of(&f.source)),
             });
         }
     }
@@ -471,11 +471,14 @@ fn diff_reservations(ctx: &DiffCtx<'_>, entries: &mut Vec<DiffEntry>) {
     for (ip, r) in &src {
         let ip_str = ip.to_string();
         match tgt.get(ip) {
-            None => entries.push(DiffEntry::MissingInTarget {
-                entity: entity("reservation", &ip_str),
-                detail: format!("reservation {ip} ({}) missing in target", r.mac),
-                locations: DiffLocations::source_only(loc_of(&r.source)),
-            }),
+            None => {
+                let parent_tgt = subnet_for_ip(ctx.target, *ip).and_then(|sn| loc_of(&sn.source));
+                entries.push(DiffEntry::MissingInTarget {
+                    entity: entity("reservation", &ip_str),
+                    detail: format!("reservation {ip} ({}) missing in target", r.mac),
+                    locations: DiffLocations::both(loc_of(&r.source), parent_tgt),
+                });
+            }
             Some(t) => {
                 if r.mac != t.mac {
                     let src_v = NormalizedValue::String(r.mac.clone());
@@ -544,10 +547,11 @@ fn diff_reservations(ctx: &DiffCtx<'_>, entries: &mut Vec<DiffEntry>) {
     }
     for (ip, r) in &tgt {
         if !src.contains_key(ip) {
+            let parent_src = subnet_for_ip(ctx.source, *ip).and_then(|sn| loc_of(&sn.source));
             entries.push(DiffEntry::ExtraInTarget {
                 entity: entity("reservation", &ip.to_string()),
                 detail: format!("reservation {ip} ({}) extra in target", r.mac),
-                locations: DiffLocations::target_only(loc_of(&r.source)),
+                locations: DiffLocations::both(parent_src, loc_of(&r.source)),
             });
         }
     }
@@ -1185,5 +1189,153 @@ mod tests {
         let d = res.display.unwrap();
         assert_eq!(d.object_type, "Reservation");
         assert_eq!(d.name, "10.0.80.49");
+    }
+
+    fn subnet_with(
+        cidr: &str,
+        line: u32,
+        pools: Vec<Pool>,
+        reservations: Vec<Reservation>,
+    ) -> Subnet {
+        Subnet {
+            network: cidr.parse().unwrap(),
+            shared_network: None,
+            options: BTreeMap::new(),
+            pools,
+            reservations,
+            filters: Vec::new(),
+            extensions: BTreeMap::new(),
+            source: Some(SourceRef::new("test", "test.conf", line)),
+        }
+    }
+
+    fn pool_at(start: &str, end: &str, line: u32) -> Pool {
+        Pool {
+            start: start.parse().unwrap(),
+            end: end.parse().unwrap(),
+            options: BTreeMap::new(),
+            extensions: BTreeMap::new(),
+            source: Some(SourceRef::new("test", "test.conf", line)),
+        }
+    }
+
+    fn reservation_at(ip: &str, mac: &str, line: u32) -> Reservation {
+        Reservation {
+            mac: mac.into(),
+            ip: ip.parse().unwrap(),
+            options: BTreeMap::new(),
+            extensions: BTreeMap::new(),
+            source: Some(SourceRef::new("test", "test.conf", line)),
+        }
+    }
+
+    #[test]
+    fn missing_pool_includes_target_parent_subnet_location() {
+        let source = Config {
+            subnets: vec![subnet_with(
+                "10.0.0.0/24",
+                1,
+                vec![pool_at("10.0.0.10", "10.0.0.20", 5)],
+                vec![],
+            )],
+            ..Config::default()
+        };
+        let target = Config {
+            subnets: vec![subnet_with("10.0.0.0/24", 10, vec![], vec![])],
+            ..Config::default()
+        };
+        let report = diff_configs(&source, &target);
+        let entry = report
+            .entries
+            .iter()
+            .find(|e| {
+                matches!(
+                    e,
+                    DiffEntry::MissingInTarget { entity, .. } if entity.kind == "pool"
+                )
+            })
+            .expect("missing pool entry");
+        match entry {
+            DiffEntry::MissingInTarget { locations, .. } => {
+                let src = locations.source.as_ref().expect("source loc");
+                let tgt = locations.target.as_ref().expect("target parent loc");
+                assert_eq!(src.affected.line, 5);
+                assert_eq!(tgt.affected.line, 10);
+            }
+            _ => unreachable!(),
+        }
+    }
+
+    #[test]
+    fn missing_reservation_includes_target_parent_when_subnet_exists() {
+        let source = Config {
+            subnets: vec![subnet_with(
+                "10.0.0.0/24",
+                1,
+                vec![],
+                vec![reservation_at("10.0.0.50", "aa:bb:cc:dd:ee:01", 8)],
+            )],
+            ..Config::default()
+        };
+        let target = Config {
+            subnets: vec![subnet_with("10.0.0.0/24", 20, vec![], vec![])],
+            ..Config::default()
+        };
+        let report = diff_configs(&source, &target);
+        let entry = report
+            .entries
+            .iter()
+            .find(|e| {
+                matches!(
+                    e,
+                    DiffEntry::MissingInTarget { entity, .. } if entity.kind == "reservation"
+                )
+            })
+            .expect("missing reservation");
+        match entry {
+            DiffEntry::MissingInTarget { locations, .. } => {
+                assert_eq!(
+                    locations.source.as_ref().unwrap().affected.line,
+                    8
+                );
+                assert_eq!(
+                    locations.target.as_ref().unwrap().affected.line,
+                    20
+                );
+            }
+            _ => unreachable!(),
+        }
+    }
+
+    #[test]
+    fn missing_reservation_omits_target_when_subnet_absent() {
+        let source = Config {
+            subnets: vec![subnet_with(
+                "10.0.0.0/24",
+                1,
+                vec![],
+                vec![reservation_at("10.0.0.50", "aa:bb:cc:dd:ee:01", 8)],
+            )],
+            ..Config::default()
+        };
+        let target = Config::default();
+        let report = diff_configs(&source, &target);
+        let entry = report
+            .entries
+            .iter()
+            .find(|e| {
+                matches!(
+                    e,
+                    DiffEntry::MissingInTarget { entity, .. } if entity.kind == "reservation"
+                )
+            })
+            .expect("missing reservation");
+        match entry {
+            DiffEntry::MissingInTarget { locations, .. } => {
+                assert!(locations.source.is_some());
+                assert!(locations.target.is_none());
+            }
+            _ => unreachable!(),
+        }
     }
 }

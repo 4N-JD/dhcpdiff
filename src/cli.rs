@@ -31,9 +31,6 @@ pub enum Commands {
         format: ReportFormat,
         #[arg(long)]
         ignore_unmapped: bool,
-        /// Ignore dhcp option 1 (subnet-mask) when comparing configs
-        #[arg(long, default_value_t = true, action = clap::ArgAction::Set)]
-        ignore_subnet_mask: bool,
     },
     /// Normalize a config to unified JSON IR
     Normalize {
@@ -45,9 +42,6 @@ pub enum Commands {
         output: PathBuf,
         #[arg(long)]
         mapping: Option<PathBuf>,
-        /// Ignore dhcp option 1 (subnet-mask) in normalized output
-        #[arg(long, default_value_t = true, action = clap::ArgAction::Set)]
-        ignore_subnet_mask: bool,
     },
     /// Interactively map unknown options (TUI)
     Map {
@@ -101,7 +95,6 @@ pub fn run() -> anyhow::Result<()> {
             vendor,
             output,
             mapping,
-            ignore_subnet_mask,
         } => {
             let mapping_path = mapping.as_deref();
             run_normalize(
@@ -110,9 +103,7 @@ pub fn run() -> anyhow::Result<()> {
                 &vendor,
                 mapping_path,
                 &output,
-                ResolverOptions {
-                    ignore_subnet_mask: Some(ignore_subnet_mask),
-                },
+                ResolverOptions::default(),
             )
                 .map_err(|e| anyhow::anyhow!("normalize failed: {e}"))?;
             println!("Wrote {}", output.display());
@@ -125,7 +116,6 @@ pub fn run() -> anyhow::Result<()> {
             mapping,
             format,
             ignore_unmapped,
-            ignore_subnet_mask,
         } => {
             let default_mapping = default_mapping_path();
             let mapping_path = mapping
@@ -139,9 +129,7 @@ pub fn run() -> anyhow::Result<()> {
                 &target_vendor,
                 mapping_path,
                 ignore_unmapped,
-                ResolverOptions {
-                    ignore_subnet_mask: Some(ignore_subnet_mask),
-                },
+                ResolverOptions::default(),
             )?;
             let code = print_diff_result(&result, format.into_output_format())?;
             if code != 0 {

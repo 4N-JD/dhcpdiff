@@ -106,14 +106,13 @@ equivalences:
     target: { space: dhcp, code: 220 }
     confirmed: true
 ignore:
+  - { space: dhcp, code: 1 }   # subnet-mask; usually implied by netmask
   - { space: dhcp, code: 999 }
   - { space: isc, code: 1 }   # ignore min-lease-time only
   - { space: isc, code: 2 }   # ignore max-lease-time only
-# Ignore dhcp option 1 (subnet-mask); redundant with subnet netmask declaration.
-ignore_subnet_mask: true
 ```
 
-`ignore` entries are `{ space, code }` pairs matching the IR keys shown in diffs (for example `isc:0 (default-lease-time)` or `dhcp:6 (domain-name-servers)`). Add any option you want excluded from normalize/diff to that list.
+`ignore` entries are `{ space, code }` pairs matching the IR keys shown in diffs (for example `isc:0 (default-lease-time)` or `dhcp:6 (domain-name-servers)`). Add any option you want excluded from normalize/diff to that list. Default user mappings include `dhcp:1` (subnet-mask) because it is usually redundant with the subnet netmask declaration.
 
 Confirmed equivalences also rewrite `vendor-option-space` when every mapped code for a source space shares the same target space (for example `MSFT50` → `Microsoft-Windows-Options`), so VCI scenario gating stays aligned with remapped option keys.
 
@@ -144,8 +143,6 @@ Diff also evaluates **client scenarios** so conditional rules (`class`, `if` / `
 Limitations: opaque/`and`/`or` match expressions are only partially evaluated; CLI `--vendor-class` overrides are not implemented yet; `allow members of` class membership is not modeled.
 
 For large configs, build with `--release` (`cargo run --release -- diff ...`). Diff prints progress to stderr while parsing and comparing.
-
-**Subnet mask (dhcp option 1)** is ignored by default during diff and normalize, since it is usually implied by the subnet declaration. Disable with `--no-ignore-subnet-mask` on the CLI or `ignore_subnet_mask: false` in `mappings/user.yaml`.
 
 ## Adding a new vendor
 

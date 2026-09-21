@@ -7,6 +7,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from .diff_runner import DEFAULT_VENDORS, load_default_mapping
+from .mapping_model import parse_user_mapping
 from .jobs import (
     JobError,
     create_job_from_upload,
@@ -37,12 +38,33 @@ def health() -> dict:
 
 @app.get("/api/defaults")
 def defaults() -> dict:
+    mapping_yaml = load_default_mapping()
+    mapping = parse_user_mapping(mapping_yaml)
     return {
         "vendors": DEFAULT_VENDORS,
-        "mapping_yaml": load_default_mapping(),
-        "ignore_unmapped": True,
-        "ignore_subnet_mask": True,
+        "mapping_yaml": mapping_yaml,
+        "mapping": mapping,
+        "ignore_unmapped": False,
     }
+
+
+@app.post("/api/mapping/parse")
+async def parse_mapping(
+    mapping_yaml: str = Form(""),
+    file: UploadFile | None = File(None),
+) -> dict:
+    """Parse uploaded or pasted user.yaml text into the structured mapping model."""
+    text = mapping_yaml
+    if file is not None and file.filename:
+        raw = await file.read()
+        try:
+            text = raw.decode("utf-8")
+        except UnicodeDecodeError as exc:
+            raise HTTPException(status_code=400, detail="mapping file must be UTF-8 text") from exc
+    if not (text or "").strip():
+        raise HTTPException(status_code=400, detail="mapping YAML is empty")
+    mapping = parse_user_mapping(text)
+    return {"mapping": mapping, "mapping_yaml": text}
 
 
 async def _create_job_response(
@@ -52,7 +74,6 @@ async def _create_job_response(
     target_vendor: str,
     mapping_yaml: str,
     ignore_unmapped: str,
-    ignore_subnet_mask: str,
 ) -> dict:
     source_bytes = await source.read()
     target_bytes = await target.read()
@@ -75,7 +96,6 @@ async def _create_job_response(
             source_vendor=source_vendor or "auto",
             target_vendor=target_vendor or "auto",
             ignore_unmapped=_as_bool(ignore_unmapped),
-            ignore_subnet_mask=_as_bool(ignore_subnet_mask),
         )
     except JobError as exc:
         _raise_job_error(exc)
@@ -90,8 +110,7 @@ async def create_job(
     source_vendor: str = Form("auto"),
     target_vendor: str = Form("auto"),
     mapping_yaml: str = Form(""),
-    ignore_unmapped: str = Form("true"),
-    ignore_subnet_mask: str = Form("true"),
+    ignore_unmapped: str = Form("false"),
 ) -> dict:
     return await _create_job_response(
         source,
@@ -100,7 +119,6 @@ async def create_job(
         target_vendor,
         mapping_yaml,
         ignore_unmapped,
-        ignore_subnet_mask,
     )
 
 
@@ -111,8 +129,7 @@ async def diff_configs(
     source_vendor: str = Form("auto"),
     target_vendor: str = Form("auto"),
     mapping_yaml: str = Form(""),
-    ignore_unmapped: str = Form("true"),
-    ignore_subnet_mask: str = Form("true"),
+    ignore_unmapped: str = Form("false"),
 ) -> dict:
     """Alias of POST /api/jobs — returns a job summary, not full file bodies."""
     return await _create_job_response(
@@ -122,7 +139,6 @@ async def diff_configs(
         target_vendor,
         mapping_yaml,
         ignore_unmapped,
-        ignore_subnet_mask,
     )
 
 

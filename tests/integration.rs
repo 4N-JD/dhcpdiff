@@ -394,10 +394,39 @@ fn bootp_params_inherit_in_bootp_space() {
     );
 }
 
+fn load_with_mappings(
+    vendor: &str,
+    path: PathBuf,
+    mappings: dhcpdiff::options::mappings::UserMappings,
+) -> dhcpdiff::model::Config {
+    let registry = VendorRegistry::new();
+    let mut resolver = OptionResolver::load(None, ResolverOptions::default()).unwrap();
+    resolver.apply_user_mappings(mappings);
+    let input = Input::from_path(path).unwrap();
+    let mut config = registry.parse_and_normalize(vendor, &input).unwrap();
+    resolver.resolve_config(&mut config);
+    config
+}
+
 #[test]
-fn ignore_subnet_mask_by_default() {
-    let source = load("infoblox", fixture("ignore_subnet_mask_a.conf"));
-    let target = load("infoblox", fixture("ignore_subnet_mask_b.conf"));
+fn ignore_subnet_mask_via_mapping() {
+    let mappings = dhcpdiff::options::mappings::UserMappings {
+        ignore: vec![dhcpdiff::options::OptionKeyRef {
+            space: "dhcp".to_string(),
+            code: 1,
+        }],
+        ..Default::default()
+    };
+    let source = load_with_mappings(
+        "infoblox",
+        fixture("ignore_subnet_mask_a.conf"),
+        mappings.clone(),
+    );
+    let target = load_with_mappings(
+        "infoblox",
+        fixture("ignore_subnet_mask_b.conf"),
+        mappings,
+    );
     let report = dhcpdiff::diff::diff_configs(&source, &target);
 
     let subnet_mask_diffs: Vec<_> = report
@@ -410,22 +439,36 @@ fn ignore_subnet_mask_by_default() {
         .collect();
     assert!(
         subnet_mask_diffs.is_empty(),
-        "subnet-mask should be ignored by default: {:?}",
+        "subnet-mask should be ignored when dhcp:1 is in ignore: {:?}",
         subnet_mask_diffs
     );
 }
 
 #[test]
-fn ignore_subnet_mask_can_be_disabled() {
-    let registry = VendorRegistry::new();
-    let resolver = OptionResolver::load(
-        None,
-        ResolverOptions {
-            ignore_subnet_mask: Some(false),
-        },
-    )
-    .unwrap();
+fn ignore_subnet_mask_absent_when_not_in_mapping() {
+    let source = load("infoblox", fixture("ignore_subnet_mask_a.conf"));
+    let target = load("infoblox", fixture("ignore_subnet_mask_b.conf"));
+    let report = dhcpdiff::diff::diff_configs(&source, &target);
+    let subnet_mask_diffs: Vec<_> = report
+        .entries
+        .iter()
+        .filter(|e| matches!(e, DiffEntry::Changed { entity, .. }
+            if entity.kind == "option" && entity.key.contains("dhcp:1")))
+        .collect();
+    assert!(
+        !subnet_mask_diffs.is_empty(),
+        "subnet-mask diff should appear when dhcp:1 is not ignored"
+    );
+}
 
+#[test]
+fn legacy_ignore_subnet_mask_flag_migrates_to_ignore() {
+    let mut resolver = OptionResolver::load(None, ResolverOptions::default()).unwrap();
+    resolver.apply_user_mappings(dhcpdiff::options::mappings::UserMappings {
+        ignore_subnet_mask: Some(true),
+        ..Default::default()
+    });
+    let registry = VendorRegistry::new();
     let mut source = registry
         .parse_and_normalize(
             "infoblox",
@@ -440,17 +483,19 @@ fn ignore_subnet_mask_can_be_disabled() {
         .unwrap();
     resolver.resolve_config(&mut source);
     resolver.resolve_config(&mut target);
-
     let report = dhcpdiff::diff::diff_configs(&source, &target);
     let subnet_mask_diffs: Vec<_> = report
         .entries
         .iter()
         .filter(|e| matches!(e, DiffEntry::Changed { entity, .. }
+            | DiffEntry::MissingInTarget { entity, .. }
+            | DiffEntry::ExtraInTarget { entity, .. }
             if entity.kind == "option" && entity.key.contains("dhcp:1")))
         .collect();
     assert!(
-        !subnet_mask_diffs.is_empty(),
-        "subnet-mask diff should appear when ignore is disabled"
+        subnet_mask_diffs.is_empty(),
+        "legacy ignore_subnet_mask: true should ignore dhcp:1: {:?}",
+        subnet_mask_diffs
     );
 }
 

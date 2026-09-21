@@ -12,8 +12,8 @@ pub struct UserMappings {
     pub equivalences: Vec<EquivalenceMapping>,
     #[serde(default)]
     pub ignore: Vec<OptionKeyRef>,
-    /// When true (default), dhcp option 1 (subnet-mask) is excluded from diff/normalize.
-    #[serde(default)]
+    /// Legacy flag: when `true` on load, dhcp:1 is added to `ignore`. Never written back.
+    #[serde(default, skip_serializing)]
     pub ignore_subnet_mask: Option<bool>,
 }
 
