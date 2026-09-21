@@ -11,8 +11,11 @@ def build_entity_display(kind: str, key: str) -> dict[str, Any]:
             "object_type": "Subnet",
             "name": key,
             "parent": None,
+            "parent_key": None,
             "vci": None,
             "declared_in": None,
+            "declaration_key": None,
+            "option_id": None,
             "summary": f"Subnet {key}",
         }
     if kind == "pool":
@@ -22,16 +25,22 @@ def build_entity_display(kind: str, key: str) -> dict[str, Any]:
                 "object_type": "Pool",
                 "name": range,
                 "parent": f"Subnet {cidr}",
+                "parent_key": cidr,
                 "vci": None,
                 "declared_in": None,
+                "declaration_key": None,
+                "option_id": None,
                 "summary": f"Pool {range} in subnet {cidr}",
             }
         return {
             "object_type": "Pool",
             "name": key,
             "parent": None,
+            "parent_key": None,
             "vci": None,
             "declared_in": None,
+            "declaration_key": None,
+            "option_id": None,
             "summary": f"Pool {key}",
         }
     if kind == "reservation":
@@ -39,8 +48,11 @@ def build_entity_display(kind: str, key: str) -> dict[str, Any]:
             "object_type": "Reservation",
             "name": key,
             "parent": None,
+            "parent_key": None,
             "vci": None,
             "declared_in": None,
+            "declaration_key": None,
+            "option_id": None,
             "summary": f"Reservation {key}",
         }
     if kind == "filter":
@@ -52,16 +64,22 @@ def build_entity_display(kind: str, key: str) -> dict[str, Any]:
                 "object_type": "Filter",
                 "name": name,
                 "parent": parent,
+                "parent_key": scope,
                 "vci": None,
                 "declared_in": None,
+                "declaration_key": None,
+                "option_id": None,
                 "summary": f"Filter {name} ({parent})",
             }
         return {
             "object_type": "Filter",
             "name": key,
             "parent": None,
+            "parent_key": None,
             "vci": None,
             "declared_in": None,
+            "declaration_key": None,
+            "option_id": None,
             "summary": f"Filter {key}",
         }
     if kind == "option":
@@ -70,15 +88,35 @@ def build_entity_display(kind: str, key: str) -> dict[str, Any]:
         "object_type": kind[:1].upper() + kind[1:] if kind else "Entity",
         "name": key,
         "parent": None,
+        "parent_key": None,
         "vci": None,
         "declared_in": None,
+        "declaration_key": None,
+        "option_id": None,
         "summary": f"{kind}:{key}",
     }
 
 
+def _option_id_from_label(option_name: str) -> str | None:
+    text = (option_name or "").strip()
+    if not text:
+        return None
+    if text.endswith(")") and " (" in text:
+        text = text[: text.rfind(" (")]
+    text = text.strip()
+    return text if ":" in text else None
+
+
+def _affected_as_declaration_key(scope: str) -> str:
+    base = (scope or "").split(":vci=", 1)[0]
+    return base if base else "global"
+
+
 def _parse_option_display(key: str) -> dict[str, Any]:
     scope, option_name, vci = _split_option_key(key)
-    object_type, name, parent, summary_base = _describe_option_scope(scope, option_name)
+    object_type, name, parent, parent_key, summary_base = _describe_option_scope(
+        scope, option_name
+    )
     summary = (
         f"{summary_base} — affects clients with VCI {vci}" if vci else summary_base
     )
@@ -86,8 +124,11 @@ def _parse_option_display(key: str) -> dict[str, Any]:
         "object_type": object_type,
         "name": name,
         "parent": parent,
+        "parent_key": parent_key,
         "vci": vci,
         "declared_in": None,
+        "declaration_key": _affected_as_declaration_key(scope),
+        "option_id": _option_id_from_label(option_name),
         "summary": summary,
     }
 
@@ -197,23 +238,25 @@ def parse_option_detail_value(detail: str) -> str | None:
     return None
 
 
-def _describe_option_scope(scope: str, option_name: str) -> tuple[str, str, str | None, str]:
+def _describe_option_scope(
+    scope: str, option_name: str
+) -> tuple[str, str, str | None, str | None, str]:
     name = option_name or "option"
     if not scope or scope == "global":
-        return "Option", name, "Global", f"Option {name} (global)"
+        return "Option", name, "Global", "global", f"Option {name} (global)"
     if scope.startswith("pool:"):
         rest = scope[len("pool:") :]
         if ":" in rest:
             cidr, range = rest.split(":", 1)
             parent = f"Pool {range} in subnet {cidr}"
-            return "Option", name, parent, f"Option {name} on {parent}"
+            return "Option", name, parent, scope, f"Option {name} on {parent}"
         parent = f"Pool {rest}"
-        return "Option", name, parent, f"Option {name} on {parent}"
+        return "Option", name, parent, scope, f"Option {name} on {parent}"
     if scope.startswith("reservation:"):
         ip = scope[len("reservation:") :]
         parent = f"Reservation {ip}"
-        return "Option", name, parent, f"Option {name} on {parent}"
-    return "Option", name, scope, f"Option {name} ({scope})"
+        return "Option", name, parent, scope, f"Option {name} on {parent}"
+    return "Option", name, scope, scope, f"Option {name} ({scope})"
 
 
 def enrich_entries_with_display(report: dict[str, Any]) -> dict[str, Any]:

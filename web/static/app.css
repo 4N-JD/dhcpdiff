@@ -57,6 +57,17 @@ header.app .meta {
   color: var(--muted);
 }
 
+.rerun-banner {
+  flex-shrink: 0;
+  padding: 0.45rem 1rem;
+  font-size: 0.85rem;
+  font-weight: 500;
+  color: #7a4b08;
+  background: #fffaeb;
+  border-bottom: 1px solid #f5d5a0;
+  text-align: center;
+}
+
 .setup {
   background: var(--surface);
   border-bottom: 1px solid var(--border);
@@ -105,6 +116,25 @@ header.app .meta {
   flex-direction: column;
   gap: 0.35rem;
   justify-content: center;
+}
+
+.hidden-diffs {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  min-height: 1.5rem;
+}
+
+.hidden-meta {
+  font-size: 0.82rem;
+  font-weight: 500;
+  color: var(--muted);
+}
+
+#resetHiddenBtn {
+  font-size: 0.75rem;
+  padding: 0.2rem 0.5rem;
 }
 
 .check {
@@ -637,6 +667,19 @@ button.primary:hover { filter: brightness(1.05); }
   font-weight: 600;
   margin: 0;
   word-break: break-all;
+  flex: 1 1 auto;
+}
+
+.detail-actions {
+  display: flex;
+  gap: 0.35rem;
+  margin-left: auto;
+}
+
+.detail-actions button {
+  font-size: 0.75rem;
+  padding: 0.25rem 0.55rem;
+  font-weight: 600;
 }
 
 .detail-desc {

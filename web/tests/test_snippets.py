@@ -102,8 +102,20 @@ class EntityDisplayTests(unittest.TestCase):
         self.assertEqual(
             d["parent"], "Pool 10.162.40.250-10.162.40.251 in subnet 10.162.40.0/24"
         )
+        self.assertEqual(
+            d["parent_key"], "pool:10.162.40.0/24:10.162.40.250-10.162.40.251"
+        )
+        self.assertEqual(d["option_id"], "bootp:0")
         self.assertEqual(d["vci"], "PXEClient")
         self.assertIn("affects clients with VCI PXEClient", d["summary"])
+
+    def test_pool_and_filter_parent_key(self):
+        pool = build_entity_display("pool", "10.0.80.0/24:10.0.80.1-10.0.80.10")
+        self.assertEqual(pool["parent_key"], "10.0.80.0/24")
+        filt = build_entity_display("filter", "10.0.80.0/24:MyFilter:match")
+        self.assertEqual(filt["parent_key"], "10.0.80.0/24")
+        res = build_entity_display("reservation", "10.0.80.49")
+        self.assertIsNone(res["parent_key"])
 
     def test_parse_option_space_code(self):
         self.assertEqual(

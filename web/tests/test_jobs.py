@@ -156,6 +156,204 @@ class EntryPagingTests(unittest.TestCase):
         self.assertEqual(page["total"], 3)
         self.assertEqual(page["entries"][0]["index"], 1)
 
+    def test_list_hide_by_entry_and_parent(self):
+        from app.jobs import parse_hide_param
+
+        # Enrich fixtures with parent_key for parent-rule test
+        base = Path(os.environ["DHCPDIFF_JOB_DIR"]) / self.job_id
+        entries = [
+            {
+                "category": "missing",
+                "entity": {
+                    "kind": "reservation",
+                    "key": "10.0.0.1",
+                    "display": {
+                        "object_type": "Reservation",
+                        "name": "10.0.0.1",
+                        "parent_key": "10.0.0.0/24",
+                        "summary": "Reservation 10.0.0.1",
+                    },
+                },
+                "detail": "a",
+            },
+            {
+                "category": "missing",
+                "entity": {
+                    "kind": "reservation",
+                    "key": "10.0.0.2",
+                    "display": {
+                        "object_type": "Reservation",
+                        "name": "10.0.0.2",
+                        "parent_key": "10.0.0.0/24",
+                        "summary": "Reservation 10.0.0.2",
+                    },
+                },
+                "detail": "b",
+            },
+            {
+                "category": "extra",
+                "entity": {
+                    "kind": "reservation",
+                    "key": "10.0.1.1",
+                    "display": {
+                        "object_type": "Reservation",
+                        "name": "10.0.1.1",
+                        "parent_key": "10.0.1.0/24",
+                        "summary": "Reservation 10.0.1.1",
+                    },
+                },
+                "detail": "c",
+            },
+            {
+                "category": "changed",
+                "entity": {
+                    "kind": "pool",
+                    "key": "10.0.0.0/24:1-2",
+                    "display": {
+                        "object_type": "Pool",
+                        "name": "1-2",
+                        "parent_key": "10.0.0.0/24",
+                        "summary": "Pool 1-2",
+                    },
+                },
+                "detail": "d",
+            },
+        ]
+        (base / "report.json").write_text(
+            json.dumps({"entries": entries, "counts": {"total": 4}}),
+            encoding="utf-8",
+        )
+        import app.jobs as jobs
+
+        jobs._report_cache.clear()
+
+        hide_one = parse_hide_param(
+            json.dumps({"entries": [{"kind": "reservation", "key": "10.0.0.1"}], "parents": []})
+        )
+        page = list_entries(self.job_id, category="all", hide=hide_one)
+        self.assertEqual(page["total"], 3)
+        self.assertEqual([e["entity"]["key"] for e in page["entries"]], ["10.0.0.2", "10.0.1.1", "10.0.0.0/24:1-2"])
+
+        hide_parent = parse_hide_param(
+            json.dumps(
+                {
+                    "entries": [],
+                    "parents": [{"kind": "reservation", "parent_key": "10.0.0.0/24"}],
+                }
+            )
+        )
+        page = list_entries(self.job_id, category="all", hide=hide_parent)
+        # Both reservations in 10.0.0.0/24 hidden; other subnet reservation + pool remain
+        self.assertEqual(page["total"], 2)
+        self.assertEqual(
+            [(e["entity"]["kind"], e["entity"]["key"]) for e in page["entries"]],
+            [("reservation", "10.0.1.1"), ("pool", "10.0.0.0/24:1-2")],
+        )
+
+        # Parent rule is kind-scoped: pool under same CIDR stays
+        self.assertEqual(page["entries"][1]["entity"]["kind"], "pool")
+
+    def test_list_hide_option_by_declaration_and_option_id(self):
+        from app.jobs import parse_hide_param
+
+        base = Path(os.environ["DHCPDIFF_JOB_DIR"]) / self.job_id
+        entries = [
+            {
+                "category": "changed",
+                "entity": {
+                    "kind": "option",
+                    "key": "pool:10.10.11.0/25:10.10.11.79-10.10.11.82:dhcp:15 (domain-name)",
+                    "display": {
+                        "object_type": "Option",
+                        "name": "dhcp:15 (domain-name)",
+                        "parent_key": "pool:10.10.11.0/25:10.10.11.79-10.10.11.82",
+                        "declaration_key": "subnet:10.10.11.0/25",
+                        "option_id": "dhcp:15",
+                        "summary": "Option dhcp:15 on Pool A",
+                    },
+                },
+                "detail": "a",
+            },
+            {
+                "category": "changed",
+                "entity": {
+                    "kind": "option",
+                    "key": "pool:10.10.11.0/25:10.10.11.85-10.10.11.95:dhcp:15 (domain-name)",
+                    "display": {
+                        "object_type": "Option",
+                        "name": "dhcp:15 (domain-name)",
+                        "parent_key": "pool:10.10.11.0/25:10.10.11.85-10.10.11.95",
+                        "declaration_key": "subnet:10.10.11.0/25",
+                        "option_id": "dhcp:15",
+                        "summary": "Option dhcp:15 on Pool B",
+                    },
+                },
+                "detail": "b",
+            },
+            {
+                "category": "changed",
+                "entity": {
+                    "kind": "option",
+                    "key": "pool:10.10.11.0/25:10.10.11.79-10.10.11.82:dhcp:6 (domain-name-servers)",
+                    "display": {
+                        "object_type": "Option",
+                        "name": "dhcp:6 (domain-name-servers)",
+                        "parent_key": "pool:10.10.11.0/25:10.10.11.79-10.10.11.82",
+                        "declaration_key": "subnet:10.10.11.0/25",
+                        "option_id": "dhcp:6",
+                        "summary": "Option dhcp:6 on Pool A",
+                    },
+                },
+                "detail": "c",
+            },
+            {
+                "category": "changed",
+                "entity": {
+                    "kind": "option",
+                    "key": "pool:10.10.12.0/25:10.10.12.1-10.10.12.10:dhcp:15 (domain-name)",
+                    "display": {
+                        "object_type": "Option",
+                        "name": "dhcp:15 (domain-name)",
+                        "parent_key": "pool:10.10.12.0/25:10.10.12.1-10.10.12.10",
+                        "declaration_key": "subnet:10.10.12.0/25",
+                        "option_id": "dhcp:15",
+                        "summary": "Option dhcp:15 other subnet",
+                    },
+                },
+                "detail": "d",
+            },
+        ]
+        (base / "report.json").write_text(
+            json.dumps({"entries": entries, "counts": {"total": 4}}),
+            encoding="utf-8",
+        )
+        import app.jobs as jobs
+
+        jobs._report_cache.clear()
+
+        hide = parse_hide_param(
+            json.dumps(
+                {
+                    "entries": [],
+                    "parents": [
+                        {
+                            "kind": "option",
+                            "parent_key": "subnet:10.10.11.0/25",
+                            "option_id": "dhcp:15",
+                        }
+                    ],
+                }
+            )
+        )
+        page = list_entries(self.job_id, category="all", hide=hide)
+        self.assertEqual(page["total"], 2)
+        remaining = [e["entity"]["display"]["option_id"] for e in page["entries"]]
+        self.assertEqual(remaining, ["dhcp:6", "dhcp:15"])
+        self.assertEqual(
+            page["entries"][1]["entity"]["display"]["declaration_key"],
+            "subnet:10.10.12.0/25",
+        )
+
     def test_get_entry(self):
         entry = get_entry(self.job_id, 1)
         self.assertEqual(entry["category"], "extra")

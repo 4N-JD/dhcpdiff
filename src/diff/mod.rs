@@ -124,12 +124,21 @@ pub struct EntityDisplay {
     /// Containing scope, when applicable (e.g. "Subnet 10.0.0.0/24")
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub parent: Option<String>,
+    /// Machine-readable parent id for grouping (subnet CIDR, `global`, option scope, …)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent_key: Option<String>,
     /// Vendor-class identifier for scenario diffs, when present
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub vci: Option<String>,
     /// Where the winning option value was declared, when distinct from the affected child
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub declared_in: Option<String>,
+    /// Machine id for option declaration site (`global`, `subnet:{cidr}`, `pool:…`, …)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub declaration_key: Option<String>,
+    /// Option identity `space:code` for ignore-parent grouping
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub option_id: Option<String>,
     /// One-line summary suitable for list rows
     pub summary: String,
 }
@@ -473,8 +482,9 @@ fn diff_reservations(ctx: &DiffCtx<'_>, entries: &mut Vec<DiffEntry>) {
         match tgt.get(ip) {
             None => {
                 let parent_tgt = subnet_for_ip(ctx.target, *ip).and_then(|sn| loc_of(&sn.source));
+                let parent_key = subnet_for_ip(ctx.source, *ip).map(|sn| sn.network.to_string());
                 entries.push(DiffEntry::MissingInTarget {
-                    entity: entity("reservation", &ip_str),
+                    entity: reservation_entity(&ip_str, parent_key.as_deref()),
                     detail: format!("reservation {ip} ({}) missing in target", r.mac),
                     locations: DiffLocations::both(loc_of(&r.source), parent_tgt),
                 });
@@ -483,8 +493,9 @@ fn diff_reservations(ctx: &DiffCtx<'_>, entries: &mut Vec<DiffEntry>) {
                 if r.mac != t.mac {
                     let src_v = NormalizedValue::String(r.mac.clone());
                     let tgt_v = NormalizedValue::String(t.mac.clone());
+                    let parent_key = subnet_for_ip(ctx.source, *ip).map(|sn| sn.network.to_string());
                     entries.push(DiffEntry::Changed {
-                        entity: entity("reservation", &ip_str),
+                        entity: reservation_entity(&ip_str, parent_key.as_deref()),
                         field: "mac".to_string(),
                         detail: format!("mac: {src_v:?} -> {tgt_v:?}"),
                         values: ChangedValues {
@@ -548,8 +559,9 @@ fn diff_reservations(ctx: &DiffCtx<'_>, entries: &mut Vec<DiffEntry>) {
     for (ip, r) in &tgt {
         if !src.contains_key(ip) {
             let parent_src = subnet_for_ip(ctx.source, *ip).and_then(|sn| loc_of(&sn.source));
+            let parent_key = subnet_for_ip(ctx.target, *ip).map(|sn| sn.network.to_string());
             entries.push(DiffEntry::ExtraInTarget {
-                entity: entity("reservation", &ip.to_string()),
+                entity: reservation_entity(&ip.to_string(), parent_key.as_deref()),
                 detail: format!("reservation {ip} ({}) extra in target", r.mac),
                 locations: DiffLocations::both(parent_src, loc_of(&r.source)),
             });
@@ -800,11 +812,108 @@ fn option_entity(
     tgt_affected: &Option<LocationRef>,
 ) -> EntityRef {
     let mut entity = entity("option", &format!("{scope}:{opt}"));
-    let declared_in = declared_in_for(src, src_affected).or_else(|| declared_in_for(tgt, tgt_affected));
+    let declared_in =
+        declared_in_for(src, src_affected).or_else(|| declared_in_for(tgt, tgt_affected));
+    let declaration_key = declaration_key_for(src, src_affected, scope)
+        .or_else(|| declaration_key_for(tgt, tgt_affected, scope));
+    let option_id = option_id_from_label(opt);
     if let Some(display) = entity.display.as_mut() {
         display.declared_in = declared_in;
+        display.declaration_key = declaration_key;
+        display.option_id = option_id;
     }
     entity
+}
+
+fn option_id_from_label(opt: &str) -> Option<String> {
+    let trimmed = opt.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let without_name = match trimmed.rfind(" (") {
+        Some(i) if trimmed.ends_with(')') => &trimmed[..i],
+        _ => trimmed,
+    };
+    let id = without_name.trim();
+    if id.contains(':') {
+        Some(id.to_string())
+    } else {
+        None
+    }
+}
+
+fn scope_without_vci(scope: &str) -> &str {
+    scope.split(":vci=").next().unwrap_or(scope)
+}
+
+fn cidr_from_affected_scope(scope: &str) -> Option<String> {
+    let base = scope_without_vci(scope);
+    if let Some(rest) = base.strip_prefix("pool:") {
+        return rest.split_once(':').map(|(cidr, _)| cidr.to_string());
+    }
+    if base.starts_with("reservation:") || base == "global" || base.is_empty() {
+        return None;
+    }
+    if base.contains('/') {
+        return Some(base.to_string());
+    }
+    None
+}
+
+fn affected_as_declaration_key(scope: &str) -> String {
+    let base = scope_without_vci(scope);
+    if base.is_empty() {
+        "global".to_string()
+    } else {
+        base.to_string()
+    }
+}
+
+fn declaration_key_for(
+    bound: Option<&BoundOption>,
+    affected: &Option<LocationRef>,
+    scope: &str,
+) -> Option<String> {
+    let bound = bound?;
+    let is_local = match (bound.source.as_ref(), affected.as_ref()) {
+        (Some(decl), Some(aff)) => decl.file == aff.file && decl.line == aff.line,
+        (None, _) => true,
+        (Some(_), None) => false,
+    };
+    if is_local {
+        return Some(affected_as_declaration_key(scope));
+    }
+
+    let label = bound.declared_in.as_deref().unwrap_or("");
+    if label.is_empty() {
+        if let Some(decl) = bound.source.as_ref() {
+            return Some(format!("{}:{}", decl.file, decl.line));
+        }
+        return Some(affected_as_declaration_key(scope));
+    }
+
+    let lower = label.to_ascii_lowercase();
+    if lower == "global" || lower.starts_with("global ") {
+        return Some("global".into());
+    }
+    if lower == "subnet" || lower.starts_with("subnet ") {
+        return cidr_from_affected_scope(scope).map(|c| format!("subnet:{c}"));
+    }
+    if lower == "pool" || lower.starts_with("pool ") {
+        let base = scope_without_vci(scope);
+        if base.starts_with("pool:") {
+            return Some(base.to_string());
+        }
+        return Some(format!("decl:{label}"));
+    }
+    // Class / if and other labels: group by subnet when peelable.
+    if let Some(cidr) = cidr_from_affected_scope(scope) {
+        return Some(format!("subnet:{cidr}"));
+    }
+    if scope_without_vci(scope) == "global" {
+        return Some("global".into());
+    }
+    Some(format!("decl:{label}"))
 }
 
 fn declared_in_for(bound: Option<&BoundOption>, affected: &Option<LocationRef>) -> Option<String> {
@@ -845,14 +954,31 @@ fn entity(kind: &str, key: &str) -> EntityRef {
     }
 }
 
+fn reservation_entity(ip: &str, parent_key: Option<&str>) -> EntityRef {
+    let mut display = build_entity_display("reservation", ip);
+    if let Some(cidr) = parent_key {
+        display.parent = Some(format!("Subnet {cidr}"));
+        display.parent_key = Some(cidr.to_string());
+        display.summary = format!("Reservation {ip} in subnet {cidr}");
+    }
+    EntityRef {
+        kind: "reservation".into(),
+        key: ip.to_string(),
+        display: Some(display),
+    }
+}
+
 fn build_entity_display(kind: &str, key: &str) -> EntityDisplay {
     match kind {
         "subnet" => EntityDisplay {
             object_type: "Subnet".into(),
             name: key.to_string(),
             parent: None,
+            parent_key: None,
             vci: None,
             declared_in: None,
+            declaration_key: None,
+            option_id: None,
             summary: format!("Subnet {key}"),
         },
         "pool" => {
@@ -862,8 +988,11 @@ fn build_entity_display(kind: &str, key: &str) -> EntityDisplay {
                     object_type: "Pool".into(),
                     name: range.to_string(),
                     parent: Some(format!("Subnet {cidr}")),
+                    parent_key: Some(cidr.to_string()),
                     vci: None,
                     declared_in: None,
+                    declaration_key: None,
+                    option_id: None,
                     summary: format!("Pool {range} in subnet {cidr}"),
                 }
             } else {
@@ -871,8 +1000,11 @@ fn build_entity_display(kind: &str, key: &str) -> EntityDisplay {
                     object_type: "Pool".into(),
                     name: key.to_string(),
                     parent: None,
+                    parent_key: None,
                     vci: None,
                     declared_in: None,
+                    declaration_key: None,
+                    option_id: None,
                     summary: format!("Pool {key}"),
                 }
             }
@@ -881,8 +1013,11 @@ fn build_entity_display(kind: &str, key: &str) -> EntityDisplay {
             object_type: "Reservation".into(),
             name: key.to_string(),
             parent: None,
+            parent_key: None,
             vci: None,
             declared_in: None,
+            declaration_key: None,
+            option_id: None,
             summary: format!("Reservation {key}"),
         },
         "filter" => parse_filter_display(key),
@@ -891,8 +1026,11 @@ fn build_entity_display(kind: &str, key: &str) -> EntityDisplay {
             object_type: title_case(other),
             name: key.to_string(),
             parent: None,
+            parent_key: None,
             vci: None,
             declared_in: None,
+            declaration_key: None,
+            option_id: None,
             summary: format!("{other}:{key}"),
         },
     }
@@ -925,8 +1063,11 @@ fn parse_filter_display(key: &str) -> EntityDisplay {
             object_type: "Filter".into(),
             name,
             parent,
+            parent_key: Some(scope.to_string()),
             vci: None,
             declared_in: None,
+            declaration_key: None,
+            option_id: None,
             summary,
         }
     } else {
@@ -934,8 +1075,11 @@ fn parse_filter_display(key: &str) -> EntityDisplay {
             object_type: "Filter".into(),
             name: key.to_string(),
             parent: None,
+            parent_key: None,
             vci: None,
             declared_in: None,
+            declaration_key: None,
+            option_id: None,
             summary: format!("Filter {key}"),
         }
     }
@@ -948,7 +1092,8 @@ fn parse_option_display(key: &str) -> EntityDisplay {
     //   pool:10.0.0.0/24:10.0.0.1-10.0.0.10:vci=PXEClient:bootp:0 (next-server)
     //   reservation:10.0.0.5:vci=PXEClient:dhcp:67 (dhcp-bootfile-name)
     let (scope_and_maybe_vci, option_name, vci) = split_option_key(key);
-    let (object_type, name, parent, summary_base) = describe_option_scope(&scope_and_maybe_vci, &option_name);
+    let (object_type, name, parent, parent_key, summary_base) =
+        describe_option_scope(&scope_and_maybe_vci, &option_name);
 
     let summary = match &vci {
         Some(v) => format!("{summary_base} — affects clients with VCI {v}"),
@@ -959,8 +1104,12 @@ fn parse_option_display(key: &str) -> EntityDisplay {
         object_type,
         name,
         parent,
+        parent_key,
         vci,
         declared_in: None,
+        // Fallback without BoundOption: treat affected scope as declaration site.
+        declaration_key: Some(affected_as_declaration_key(&scope_and_maybe_vci)),
+        option_id: option_id_from_label(&option_name),
         summary,
     }
 }
@@ -1032,7 +1181,7 @@ fn peel_option_suffix(key: &str) -> Option<(String, String)> {
 fn describe_option_scope(
     scope: &str,
     option_name: &str,
-) -> (String, String, Option<String>, String) {
+) -> (String, String, Option<String>, Option<String>, String) {
     let name = if option_name.is_empty() {
         "option".to_string()
     } else {
@@ -1044,6 +1193,7 @@ fn describe_option_scope(
             "Option".into(),
             name.clone(),
             Some("Global".into()),
+            Some("global".into()),
             format!("Option {name} (global)"),
         );
     }
@@ -1056,6 +1206,7 @@ fn describe_option_scope(
                 "Option".into(),
                 name.clone(),
                 Some(parent.clone()),
+                Some(scope.to_string()),
                 format!("Option {name} on {parent}"),
             );
         }
@@ -1064,6 +1215,7 @@ fn describe_option_scope(
             "Option".into(),
             name.clone(),
             Some(parent.clone()),
+            Some(scope.to_string()),
             format!("Option {name} on {parent}"),
         );
     }
@@ -1074,6 +1226,7 @@ fn describe_option_scope(
             "Option".into(),
             name.clone(),
             Some(parent.clone()),
+            Some(scope.to_string()),
             format!("Option {name} on {parent}"),
         );
     }
@@ -1081,6 +1234,7 @@ fn describe_option_scope(
     (
         "Option".into(),
         name.clone(),
+        Some(scope.to_string()),
         Some(scope.to_string()),
         format!("Option {name} ({scope})"),
     )
@@ -1173,8 +1327,58 @@ mod tests {
             d.parent.as_deref(),
             Some("Pool 10.162.40.250-10.162.40.251 in subnet 10.162.40.0/24")
         );
+        assert_eq!(
+            d.parent_key.as_deref(),
+            Some("pool:10.162.40.0/24:10.162.40.250-10.162.40.251")
+        );
         assert_eq!(d.vci.as_deref(), Some("PXEClient"));
+        assert_eq!(d.option_id.as_deref(), Some("bootp:0"));
         assert!(d.summary.contains("affects clients with VCI PXEClient"));
+    }
+
+    #[test]
+    fn option_entity_sets_declaration_key_and_option_id() {
+        use crate::model::{BoundOption, SourceRef};
+
+        let subnet_decl = BoundOption::new(
+            NormalizedValue::String("a.example".into()),
+            Some(SourceRef::new("test", "a.conf", 2)),
+        )
+        .with_declared_in("Subnet");
+        let pool_aff = Some(LocationRef::from_source_ref(&SourceRef::new(
+            "test", "a.conf", 40,
+        )));
+        let e = option_entity(
+            "pool:10.10.11.0/25:10.10.11.79-10.10.11.82",
+            "dhcp:15 (domain-name)",
+            Some(&subnet_decl),
+            None,
+            &pool_aff,
+            &None,
+        );
+        let d = e.display.unwrap();
+        assert_eq!(d.option_id.as_deref(), Some("dhcp:15"));
+        assert_eq!(d.declaration_key.as_deref(), Some("subnet:10.10.11.0/25"));
+        assert_eq!(d.declared_in.as_deref(), Some("Subnet"));
+
+        let local = BoundOption::new(
+            NormalizedValue::String("b.example".into()),
+            Some(SourceRef::new("test", "a.conf", 40)),
+        )
+        .with_declared_in("Pool");
+        let e = option_entity(
+            "pool:10.10.11.0/25:10.10.11.79-10.10.11.82",
+            "dhcp:15 (domain-name)",
+            Some(&local),
+            None,
+            &pool_aff,
+            &None,
+        );
+        let d = e.display.unwrap();
+        assert_eq!(
+            d.declaration_key.as_deref(),
+            Some("pool:10.10.11.0/25:10.10.11.79-10.10.11.82")
+        );
     }
 
     #[test]
@@ -1184,11 +1388,18 @@ mod tests {
         assert_eq!(d.object_type, "Pool");
         assert_eq!(d.name, "10.0.80.106-10.0.80.113");
         assert_eq!(d.parent.as_deref(), Some("Subnet 10.0.80.0/24"));
+        assert_eq!(d.parent_key.as_deref(), Some("10.0.80.0/24"));
 
         let res = entity("reservation", "10.0.80.49");
         let d = res.display.unwrap();
         assert_eq!(d.object_type, "Reservation");
         assert_eq!(d.name, "10.0.80.49");
+        assert!(d.parent_key.is_none());
+
+        let res = reservation_entity("10.0.80.49", Some("10.0.80.0/24"));
+        let d = res.display.unwrap();
+        assert_eq!(d.parent.as_deref(), Some("Subnet 10.0.80.0/24"));
+        assert_eq!(d.parent_key.as_deref(), Some("10.0.80.0/24"));
     }
 
     fn subnet_with(
@@ -1293,7 +1504,17 @@ mod tests {
             })
             .expect("missing reservation");
         match entry {
-            DiffEntry::MissingInTarget { locations, .. } => {
+            DiffEntry::MissingInTarget {
+                entity, locations, ..
+            } => {
+                assert_eq!(
+                    entity.display.as_ref().and_then(|d| d.parent_key.as_deref()),
+                    Some("10.0.0.0/24")
+                );
+                assert_eq!(
+                    entity.display.as_ref().and_then(|d| d.parent.as_deref()),
+                    Some("Subnet 10.0.0.0/24")
+                );
                 assert_eq!(
                     locations.source.as_ref().unwrap().affected.line,
                     8

@@ -14,6 +14,9 @@
     <h1>dhcpdiff</h1>
     <span class="meta" id="statusMeta">Upload two configs and run a diff</span>
   </header>
+  <div class="rerun-banner" id="rerunBanner" hidden role="status">
+    Mapping or options changed — re-run diff for changes to take effect.
+  </div>
 
   <section class="setup" id="setup">
     <div class="setup-grid">
@@ -29,6 +32,10 @@
       </div>
       <div class="field toggles">
         <label class="check"><input type="checkbox" id="ignoreUnmapped"/> Ignore unmapped options</label>
+        <div class="hidden-diffs" id="hiddenDiffsRow">
+          <span class="hidden-meta" id="hiddenDiffsMeta" hidden></span>
+          <button type="button" id="resetHiddenBtn" hidden>Reset</button>
+        </div>
       </div>
       <div class="field actions">
         <button type="button" class="primary" id="runBtn">Run Diff</button>

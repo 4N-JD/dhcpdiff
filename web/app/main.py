@@ -15,6 +15,7 @@ from .jobs import (
     get_job_summary,
     list_entries,
     list_equivalence_suggestions,
+    parse_hide_param,
     read_lines,
 )
 
@@ -156,9 +157,16 @@ def job_entries(
     category: str = "all",
     offset: int = 0,
     limit: int = 100,
+    hide: str = "",
 ) -> dict:
     try:
-        return list_entries(job_id, category=category, offset=offset, limit=limit)
+        return list_entries(
+            job_id,
+            category=category,
+            offset=offset,
+            limit=limit,
+            hide=parse_hide_param(hide),
+        )
     except JobError as exc:
         _raise_job_error(exc)
 

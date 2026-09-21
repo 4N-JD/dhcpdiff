@@ -309,10 +309,102 @@ def get_job_summary(job_id: str) -> dict[str, Any]:
     }
 
 
-def _filtered_indices(entries: list[dict[str, Any]], category: str) -> list[int]:
-    if not category or category == "all":
-        return list(range(len(entries)))
-    return [i for i, e in enumerate(entries) if e.get("category") == category]
+def _filtered_indices(
+    entries: list[dict[str, Any]],
+    category: str,
+    hide: dict[str, Any] | None = None,
+) -> list[int]:
+    hide = hide or {}
+    entry_rules = {
+        (str(r.get("kind") or ""), str(r.get("key") or ""))
+        for r in (hide.get("entries") or [])
+        if isinstance(r, dict) and r.get("kind") is not None and r.get("key") is not None
+    }
+    # Parent rules: (kind, parent_key, option_id|None)
+    parent_rules: list[tuple[str, str, str | None]] = []
+    for r in hide.get("parents") or []:
+        if not isinstance(r, dict) or not r.get("kind") or not r.get("parent_key"):
+            continue
+        opt = r.get("option_id")
+        parent_rules.append(
+            (
+                str(r["kind"]),
+                str(r["parent_key"]),
+                str(opt) if opt is not None and opt != "" else None,
+            )
+        )
+
+    indices = []
+    for i, e in enumerate(entries):
+        if category and category != "all" and e.get("category") != category:
+            continue
+        entity = e.get("entity") or {}
+        kind = str(entity.get("kind") or "")
+        key = str(entity.get("key") or "")
+        if (kind, key) in entry_rules:
+            continue
+        display = entity.get("display") or {}
+        if _matches_parent_hide(kind, display, parent_rules):
+            continue
+        indices.append(i)
+    return indices
+
+
+def _matches_parent_hide(
+    kind: str,
+    display: dict[str, Any],
+    parent_rules: list[tuple[str, str, str | None]],
+) -> bool:
+    for rule_kind, rule_pk, rule_opt in parent_rules:
+        if kind != rule_kind:
+            continue
+        if rule_opt is not None:
+            # Option ignore-parent: match declaration_key + option_id
+            decl = display.get("declaration_key")
+            oid = display.get("option_id")
+            if decl is not None and str(decl) == rule_pk and oid is not None and str(oid) == rule_opt:
+                return True
+        else:
+            parent_key = display.get("parent_key")
+            if parent_key is not None and str(parent_key) == rule_pk:
+                return True
+    return False
+
+
+def parse_hide_param(raw: str | None) -> dict[str, Any]:
+    """Parse hide query JSON into {entries, parents}; invalid input yields empty rules."""
+    empty: dict[str, Any] = {"entries": [], "parents": []}
+    if not raw or not str(raw).strip():
+        return empty
+    try:
+        data = json.loads(raw)
+    except (TypeError, json.JSONDecodeError):
+        return empty
+    if not isinstance(data, dict):
+        return empty
+    entries = []
+    for item in data.get("entries") or []:
+        if not isinstance(item, dict):
+            continue
+        kind = item.get("kind")
+        key = item.get("key")
+        if kind is None or key is None:
+            continue
+        entries.append({"kind": str(kind), "key": str(key)})
+    parents = []
+    for item in data.get("parents") or []:
+        if not isinstance(item, dict):
+            continue
+        kind = item.get("kind")
+        parent_key = item.get("parent_key")
+        if not kind or parent_key is None or parent_key == "":
+            continue
+        rule: dict[str, Any] = {"kind": str(kind), "parent_key": str(parent_key)}
+        opt = item.get("option_id")
+        if opt is not None and str(opt) != "":
+            rule["option_id"] = str(opt)
+        parents.append(rule)
+    return {"entries": entries, "parents": parents}
 
 
 def list_entries(
@@ -321,6 +413,7 @@ def list_entries(
     category: str = "all",
     offset: int = 0,
     limit: int = 100,
+    hide: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     if offset < 0:
         offset = 0
@@ -331,7 +424,7 @@ def list_entries(
 
     report = load_report(job_id)
     entries = report.get("entries") or []
-    indices = _filtered_indices(entries, category)
+    indices = _filtered_indices(entries, category, hide=hide)
     total = len(indices)
     page = indices[offset : offset + limit]
     items = []
@@ -342,7 +435,11 @@ def list_entries(
             {
                 "index": i,
                 "category": entry.get("category"),
-                "entity": {"display": entity.get("display"), "kind": entity.get("kind"), "key": entity.get("key")},
+                "entity": {
+                    "display": entity.get("display"),
+                    "kind": entity.get("kind"),
+                    "key": entity.get("key"),
+                },
             }
         )
     return {

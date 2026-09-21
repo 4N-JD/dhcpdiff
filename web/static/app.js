@@ -19,12 +19,262 @@
     suggestions: [],
     mapOptionOpen: false,
     suggestionsOpen: false,
+    hide: emptyHide(),
+    hiddenCount: 0,
     listCache: new Map(), // `${filter}:${page}` -> entries[]
     lineCache: new Map(), // `${side}:${start}:${end}` -> lines
     listScrollTop: 0,
+    needsRerun: false,
+    lastRunMappingYaml: null,
+    lastRunIgnoreUnmapped: null,
   };
 
+  const SESSION_KEY = "dhcpdiff-session";
+
   const $ = (id) => document.getElementById(id);
+
+  function emptyHide() {
+    return { entries: [], parents: [] };
+  }
+
+  function hideStorageKey(jobId) {
+    return `dhcpdiff-hide-${jobId}`;
+  }
+
+  function loadHideForJob(jobId) {
+    if (!jobId) return emptyHide();
+    const key = hideStorageKey(jobId);
+    try {
+      let raw = localStorage.getItem(key);
+      if (!raw) {
+        raw = sessionStorage.getItem(key);
+        if (raw) {
+          localStorage.setItem(key, raw);
+          sessionStorage.removeItem(key);
+        }
+      }
+      if (!raw) return emptyHide();
+      return normalizeHide(JSON.parse(raw));
+    } catch {
+      return emptyHide();
+    }
+  }
+
+  function normalizeHide(raw) {
+    const out = emptyHide();
+    if (!raw || typeof raw !== "object") return out;
+    if (Array.isArray(raw.entries)) {
+      out.entries = raw.entries
+        .filter((e) => e && e.kind != null && e.key != null)
+        .map((e) => ({ kind: String(e.kind), key: String(e.key) }));
+    }
+    if (Array.isArray(raw.parents)) {
+      out.parents = raw.parents
+        .filter((p) => p && p.kind && p.parent_key != null && p.parent_key !== "")
+        .map((p) => {
+          const rule = { kind: String(p.kind), parent_key: String(p.parent_key) };
+          if (p.option_id != null && p.option_id !== "") {
+            rule.option_id = String(p.option_id);
+          }
+          return rule;
+        });
+    }
+    return out;
+  }
+
+  function persistHide() {
+    if (!state.jobId) return;
+    const key = hideStorageKey(state.jobId);
+    sessionStorage.removeItem(key);
+    if (!state.hide.entries.length && !state.hide.parents.length) {
+      localStorage.removeItem(key);
+      return;
+    }
+    localStorage.setItem(key, JSON.stringify(state.hide));
+  }
+
+  function loadSession() {
+    try {
+      const raw = localStorage.getItem(SESSION_KEY);
+      if (!raw) return null;
+      const data = JSON.parse(raw);
+      if (!data || typeof data !== "object") return null;
+      return {
+        jobId: data.jobId ? String(data.jobId) : null,
+        sourceVendor: data.sourceVendor ? String(data.sourceVendor) : "auto",
+        targetVendor: data.targetVendor ? String(data.targetVendor) : "auto",
+        ignoreUnmapped: !!data.ignoreUnmapped,
+        mapping: normalizeMapping(data.mapping),
+        lastRunMappingYaml:
+          typeof data.lastRunMappingYaml === "string" ? data.lastRunMappingYaml : null,
+        lastRunIgnoreUnmapped:
+          typeof data.lastRunIgnoreUnmapped === "boolean"
+            ? data.lastRunIgnoreUnmapped
+            : null,
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  function saveSession() {
+    try {
+      const payload = {
+        jobId: state.jobId,
+        sourceVendor: $("sourceVendor")?.value || "auto",
+        targetVendor: $("targetVendor")?.value || "auto",
+        ignoreUnmapped: !!$("ignoreUnmapped")?.checked,
+        mapping: state.mapping,
+        lastRunMappingYaml: state.lastRunMappingYaml,
+        lastRunIgnoreUnmapped: state.lastRunIgnoreUnmapped,
+      };
+      localStorage.setItem(SESSION_KEY, JSON.stringify(payload));
+    } catch {
+      /* quota / private mode */
+    }
+  }
+
+  function hideQueryParam() {
+    if (!state.hide.entries.length && !state.hide.parents.length) return "";
+    return `&hide=${encodeURIComponent(JSON.stringify(state.hide))}`;
+  }
+
+  function hasActiveHides() {
+    return state.hide.entries.length > 0 || state.hide.parents.length > 0;
+  }
+
+  async function refreshHiddenMeta() {
+    const box = $("hiddenDiffsMeta");
+    const resetBtn = $("resetHiddenBtn");
+    if (!box || !resetBtn) return;
+    if (!state.jobId || !hasActiveHides()) {
+      state.hiddenCount = 0;
+      box.hidden = true;
+      resetBtn.hidden = true;
+      box.textContent = "";
+      return;
+    }
+    try {
+      const res = await fetch(
+        `/api/jobs/${state.jobId}/entries?category=all&offset=0&limit=1${hideQueryParam()}`
+      );
+      if (!res.ok) throw new Error("hide count failed");
+      const data = await res.json();
+      const total = state.counts?.total ?? 0;
+      const visible = data.total ?? 0;
+      state.hiddenCount = Math.max(0, total - visible);
+    } catch {
+      state.hiddenCount = state.hide.entries.length + state.hide.parents.length;
+    }
+    const n = state.hiddenCount;
+    box.textContent = `${n} diff${n === 1 ? "" : "s"} hidden`;
+    box.hidden = n === 0;
+    resetBtn.hidden = n === 0;
+  }
+
+  async function applyHideAndRefresh() {
+    persistHide();
+    state.listCache.clear();
+    state.listScrollTop = 0;
+    state.selectedEntry = null;
+    await bootstrapListSelection();
+    renderListShell();
+    await paintList();
+    await showSelectedDetail();
+    await refreshHiddenMeta();
+  }
+
+  function ignoreSelectedEntry() {
+    const e = state.selectedEntry;
+    if (!e?.entity) return;
+    const kind = e.entity.kind;
+    const key = e.entity.key;
+    if (!state.hide.entries.some((x) => x.kind === kind && x.key === key)) {
+      state.hide.entries.push({ kind, key });
+    }
+    applyHideAndRefresh().catch((err) => showError(String(err)));
+  }
+
+  function ignoreSelectedParent() {
+    const e = state.selectedEntry;
+    const kind = e?.entity?.kind;
+    if (!kind) return;
+    const d = e.entity.display || {};
+    if (kind === "option") {
+      const decl = d.declaration_key;
+      const oid = d.option_id;
+      if (decl == null || decl === "" || oid == null || oid === "") return;
+      const exists = state.hide.parents.some(
+        (p) =>
+          p.kind === "option" &&
+          p.parent_key === String(decl) &&
+          p.option_id === String(oid)
+      );
+      if (!exists) {
+        state.hide.parents.push({
+          kind: "option",
+          parent_key: String(decl),
+          option_id: String(oid),
+        });
+      }
+    } else {
+      const pk = d.parent_key;
+      if (pk == null || pk === "") return;
+      if (!state.hide.parents.some((p) => p.kind === kind && p.parent_key === String(pk) && !p.option_id)) {
+        state.hide.parents.push({ kind, parent_key: String(pk) });
+      }
+    }
+    applyHideAndRefresh().catch((err) => showError(String(err)));
+  }
+
+  async function resetHiddenDiffs() {
+    if (!state.jobId) return;
+    state.hide = emptyHide();
+    persistHide();
+    state.listCache.clear();
+    state.listScrollTop = 0;
+    await bootstrapListSelection();
+    renderListShell();
+    await paintList();
+    await showSelectedDetail();
+    await refreshHiddenMeta();
+  }
+
+  function updateRerunBanner() {
+    const el = $("rerunBanner");
+    if (!el) return;
+    el.hidden = !state.needsRerun;
+  }
+
+  function markNeedsRerun() {
+    if (!state.jobId) return;
+    state.needsRerun = true;
+    updateRerunBanner();
+  }
+
+  function clearNeedsRerun() {
+    state.needsRerun = false;
+    updateRerunBanner();
+  }
+
+  /** Persist mapping/prefs and flag stale results when a job is active. */
+  function onMappingOrPrefsChanged() {
+    saveSession();
+    markNeedsRerun();
+  }
+
+  function mappingIsStaleVsLastRun() {
+    if (state.lastRunMappingYaml == null && state.lastRunIgnoreUnmapped == null) {
+      return false;
+    }
+    const mappingStale =
+      state.lastRunMappingYaml != null &&
+      serializeMappingYaml(state.mapping) !== state.lastRunMappingYaml;
+    const ignoreStale =
+      state.lastRunIgnoreUnmapped != null &&
+      !!$("ignoreUnmapped")?.checked !== state.lastRunIgnoreUnmapped;
+    return mappingStale || ignoreStale;
+  }
 
   function emptyMapping() {
     return {
@@ -139,6 +389,7 @@
       object_type: (e.entity?.kind || "entity").replace(/^./, (c) => c.toUpperCase()),
       name: e.entity?.key || "",
       parent: null,
+      parent_key: null,
       vci: null,
       summary: e.entity?.key || "",
     };
@@ -248,6 +499,75 @@
     $("ignoreUnmapped").checked = !!state.defaults.ignore_unmapped;
   }
 
+  async function openJobWorkspace(data, { restored = false } = {}) {
+    state.jobId = data.job_id;
+    state.counts = data.counts;
+    state.files = data.files;
+    state.filter = "all";
+    state.hide = loadHideForJob(state.jobId);
+    state.listCache.clear();
+    state.lineCache.clear();
+    state.listScrollTop = 0;
+    state.selectedEntry = null;
+    state.suggestions = [];
+    state.mapOptionOpen = false;
+    state.suggestionsOpen = false;
+    $("aliasRow").hidden = true;
+
+    await bootstrapListSelection();
+    renderToolbar();
+    $("workspace").hidden = false;
+    renderListShell();
+    await paintList();
+    await showSelectedDetail();
+    await refreshHiddenMeta();
+
+    const n = state.counts?.total ?? state.filteredTotal ?? 0;
+    $("statusMeta").textContent = restored
+      ? `${n} difference${n === 1 ? "" : "s"} (restored)`
+      : `${n} difference${n === 1 ? "" : "s"}`;
+  }
+
+  async function restoreJob(jobId) {
+    const res = await fetch(`/api/jobs/${encodeURIComponent(jobId)}`);
+    if (!res.ok) return false;
+    const data = await res.json();
+    await openJobWorkspace(data, { restored: true });
+    return true;
+  }
+
+  async function boot() {
+    await loadDefaults();
+    const session = loadSession();
+    if (!session) return;
+
+    const vendors = state.defaults.vendors || ["auto"];
+    fillVendors($("sourceVendor"), vendors, session.sourceVendor);
+    fillVendors($("targetVendor"), vendors, session.targetVendor);
+    applyMapping(session.mapping);
+    $("ignoreUnmapped").checked = session.ignoreUnmapped;
+    state.lastRunMappingYaml = session.lastRunMappingYaml;
+    state.lastRunIgnoreUnmapped = session.lastRunIgnoreUnmapped;
+
+    if (session.jobId) {
+      try {
+        const ok = await restoreJob(session.jobId);
+        if (!ok) {
+          state.jobId = null;
+          saveSession();
+          $("statusMeta").textContent = "Previous diff expired — mapping restored; choose files to run again";
+        } else if (mappingIsStaleVsLastRun()) {
+          markNeedsRerun();
+        }
+      } catch {
+        state.jobId = null;
+        saveSession();
+      }
+    } else {
+      saveSession();
+    }
+  }
+
   function applyMapping(raw) {
     state.mapping = normalizeMapping(raw);
     renderMappingEditor();
@@ -349,6 +669,7 @@
         if (kind === "alias") state.mapping.aliases.splice(i, 1);
         else if (kind === "equiv") state.mapping.equivalences.splice(i, 1);
         else if (kind === "ignore") state.mapping.ignore.splice(i, 1);
+        onMappingOrPrefsChanged();
         renderMappingEditor();
       });
     });
@@ -392,6 +713,7 @@
       }
       state.mapping.ignore.push({ space, code });
       clearError();
+      onMappingOrPrefsChanged();
       renderMappingEditor();
     });
   }
@@ -408,6 +730,7 @@
     if (note) entry.note = note;
     state.mapping.aliases.push(entry);
     clearError();
+    onMappingOrPrefsChanged();
     renderMappingEditor();
     return true;
   }
@@ -454,7 +777,7 @@
     if (state.listCache.has(key)) return state.listCache.get(key);
     const offset = page * LIST_PAGE;
     const res = await fetch(
-      `/api/jobs/${state.jobId}/entries?category=${encodeURIComponent(state.filter)}&offset=${offset}&limit=${LIST_PAGE}`
+      `/api/jobs/${state.jobId}/entries?category=${encodeURIComponent(state.filter)}&offset=${offset}&limit=${LIST_PAGE}${hideQueryParam()}`
     );
     if (!res.ok) throw new Error("Failed to load entries");
     const data = await res.json();
@@ -658,6 +981,75 @@
     state.selectedEntry = null;
   }
 
+  function canIgnoreParentFor(entry) {
+    const kind = entry?.entity?.kind;
+    const d = entry?.entity?.display || {};
+    if (kind === "option") {
+      return !!(d.declaration_key && d.option_id);
+    }
+    return d.parent_key != null && d.parent_key !== "";
+  }
+
+  function ignoreParentTooltip(entry) {
+    const kind = entry?.entity?.kind;
+    const d = entry?.entity?.display || {};
+    if (kind === "option") {
+      if (!d.declaration_key || !d.option_id) {
+        return "No declaration site for this option";
+      }
+      return `Hide ${d.option_id} declared at ${d.declaration_key}`;
+    }
+    if (d.parent_key) {
+      return `Hide all related ${kind || "items"} under ${d.parent_key}`;
+    }
+    return "No related group for this entry";
+  }
+
+  function mappingIgnoreRefFromEntry(entry) {
+    if (!entry || entry.entity?.kind !== "option") return null;
+    const oid = entry.entity?.display?.option_id;
+    if (oid) {
+      const fromId = spaceCodeFromLabel(oid);
+      if (fromId) return fromId;
+    }
+    return optionRefFromEntry(entry);
+  }
+
+  function canAddMappingIgnore(entry) {
+    return !!mappingIgnoreRefFromEntry(entry);
+  }
+
+  function mappingIgnoreTooltip(entry) {
+    const ref = mappingIgnoreRefFromEntry(entry);
+    if (!ref) return "Only options can be added to the mapping ignore list";
+    const already = (state.mapping.ignore || []).some(
+      (ig) => ig.space === ref.space && ig.code === ref.code
+    );
+    if (already) return `${formatOptionRef(ref)} is already in the mapping ignore list`;
+    return `Add ${formatOptionRef(ref)} to mapping ignore`;
+  }
+
+  function addSelectedToMappingIgnore() {
+    const e = state.selectedEntry;
+    const ref = mappingIgnoreRefFromEntry(e);
+    if (!ref) {
+      showError("Only options with a space:code can be added to mapping ignore.");
+      return;
+    }
+    if ((state.mapping.ignore || []).some((ig) => ig.space === ref.space && ig.code === ref.code)) {
+      showError(`${formatOptionRef(ref)} is already in the mapping ignore list.`);
+      return;
+    }
+    state.mapping.ignore.push({ space: ref.space, code: ref.code });
+    clearError();
+    onMappingOrPrefsChanged();
+    renderMappingEditor();
+    const panel = $("mappingPanel");
+    if (panel) panel.open = true;
+    $("statusMeta").textContent = `Added ${formatOptionRef(ref)} to mapping ignore`;
+    renderDetailShell();
+  }
+
   function fileMeta(side) {
     return state.files?.[side] || { name: side, line_count: 0 };
   }
@@ -700,10 +1092,25 @@
     const src = fileMeta("source");
     const tgt = fileMeta("target");
     const mapUi = mapOptionUiHtml(e);
+    const canHideRelated = canIgnoreParentFor(e);
+    const hideRelatedTitle = ignoreParentTooltip(e);
+    const canMapIgnore = canAddMappingIgnore(e);
+    const mapIgnoreRef = mappingIgnoreRefFromEntry(e);
+    const mapIgnoreAlready =
+      !!mapIgnoreRef &&
+      (state.mapping.ignore || []).some(
+        (ig) => ig.space === mapIgnoreRef.space && ig.code === mapIgnoreRef.code
+      );
+    const mapIgnoreTitle = mappingIgnoreTooltip(e);
     pane.innerHTML = `
       <div class="detail-head">
         <span class="badge ${escapeHtml(e.category)}">${escapeHtml(categoryLabel(e.category))}</span>
         <h2>${escapeHtml(d.summary)}</h2>
+        <div class="detail-actions">
+          <button type="button" id="ignoreEntryBtn" title="Hide this difference from the list">Hide</button>
+          <button type="button" id="ignoreParentBtn" ${canHideRelated ? "" : "disabled"} title="${escapeHtml(hideRelatedTitle)}">Hide related</button>
+          <button type="button" id="mappingIgnoreBtn" ${canMapIgnore && !mapIgnoreAlready ? "" : "disabled"} title="${escapeHtml(mapIgnoreTitle)}">Ignore in mapping</button>
+        </div>
       </div>
       <div class="fact-grid">${facts}</div>
       <p class="detail-desc">${escapeHtml(e.detail || "")}</p>
@@ -715,6 +1122,9 @@
       </div>
       ${legend}
     `;
+    $("ignoreEntryBtn")?.addEventListener("click", ignoreSelectedEntry);
+    $("ignoreParentBtn")?.addEventListener("click", ignoreSelectedParent);
+    $("mappingIgnoreBtn")?.addEventListener("click", addSelectedToMappingIgnore);
     bindMapOptionUi(e);
   }
 
@@ -823,7 +1233,7 @@
           code: Number($("equivTgtCode").value),
         };
         if (!insertEquivalence(source, target)) return;
-        $("statusMeta").textContent = "Equivalence added — re-run diff to apply";
+        $("statusMeta").textContent = "Equivalence added";
         if (state.suggestionsOpen) {
           renderEquivalenceSuggestionsInForm();
         }
@@ -886,7 +1296,7 @@
         const s = pending[Number(btn.dataset.i)];
         if (!s) return;
         if (!insertEquivalence(s.source, s.target)) return;
-        $("statusMeta").textContent = "Equivalence added — re-run diff to apply";
+        $("statusMeta").textContent = "Equivalence added";
         // Prefill form fields from the added pair
         if ($("equivSrcSpace")) {
           $("equivSrcSpace").value = s.source.space;
@@ -1068,31 +1478,17 @@
         state.suggestionsOpen = false;
         $("workspace").hidden = true;
         $("toolbar").hidden = true;
+        refreshHiddenMeta();
+        clearNeedsRerun();
+        saveSession();
         return;
       }
 
-      state.jobId = data.job_id;
-      state.counts = data.counts;
-      state.files = data.files;
-      state.filter = "all";
-      state.listCache.clear();
-      state.lineCache.clear();
-      state.listScrollTop = 0;
-      state.selectedEntry = null;
-      state.suggestions = [];
-      state.mapOptionOpen = false;
-      state.suggestionsOpen = false;
-      $("aliasRow").hidden = true;
-
-      await bootstrapListSelection();
-      renderToolbar();
-      $("workspace").hidden = false;
-      renderListShell();
-      await paintList();
-      await showSelectedDetail();
-
-      const n = state.counts?.total ?? state.filteredTotal ?? 0;
-      $("statusMeta").textContent = `${n} difference${n === 1 ? "" : "s"}`;
+      state.lastRunMappingYaml = serializeMappingYaml(state.mapping);
+      state.lastRunIgnoreUnmapped = !!$("ignoreUnmapped").checked;
+      await openJobWorkspace(data, { restored: false });
+      clearNeedsRerun();
+      saveSession();
     } catch (err) {
       showError(String(err));
       $("statusMeta").textContent = "Diff failed";
@@ -1140,6 +1536,7 @@
     const panel = $("mappingPanel");
     if (panel) panel.open = true;
     clearError();
+    onMappingOrPrefsChanged();
     renderMappingEditor();
     return true;
   }
@@ -1189,6 +1586,7 @@
       }
       applyMapping(data.mapping || emptyMapping());
       clearError();
+      onMappingOrPrefsChanged();
       $("statusMeta").textContent = `Loaded mapping from ${file.name}`;
       const panel = $("mappingPanel");
       if (panel) panel.open = true;
@@ -1198,6 +1596,9 @@
   }
 
   $("runBtn").addEventListener("click", runDiff);
+  $("resetHiddenBtn")?.addEventListener("click", () => {
+    resetHiddenDiffs().catch((e) => showError(String(e)));
+  });
   $("addAliasBtn").addEventListener("click", addAlias);
   $("loadMappingBtn").addEventListener("click", () => $("loadMappingFile").click());
   $("loadMappingFile").addEventListener("change", async (ev) => {
@@ -1209,7 +1610,21 @@
   $("resetMappingBtn").addEventListener("click", () => {
     if (!state.defaults) return;
     applyMapping(state.defaults.mapping || emptyMapping());
+    onMappingOrPrefsChanged();
   });
 
-  loadDefaults().catch((e) => showError(String(e)));
+  $("ignoreUnmapped")?.addEventListener("change", () => {
+    onMappingOrPrefsChanged();
+  });
+
+  $("sourceVendor")?.addEventListener("change", () => {
+    saveSession();
+    markNeedsRerun();
+  });
+  $("targetVendor")?.addEventListener("change", () => {
+    saveSession();
+    markNeedsRerun();
+  });
+
+  boot().catch((e) => showError(String(e)));
 })();
