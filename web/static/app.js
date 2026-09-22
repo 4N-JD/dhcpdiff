@@ -21,6 +21,7 @@
     suggestionsOpen: false,
     hide: emptyHide(),
     hiddenCount: 0,
+    visibleCounts: null, // hide-adjusted category totals; null = use state.counts
     listCache: new Map(), // `${filter}:${page}` -> entries[]
     lineCache: new Map(), // `${side}:${start}:${end}` -> lines
     listScrollTop: 0,
@@ -143,10 +144,39 @@
     return state.hide.entries.length > 0 || state.hide.parents.length > 0;
   }
 
+  async function refreshVisibleCounts() {
+    if (!state.jobId || !hasActiveHides()) {
+      state.visibleCounts = null;
+      return;
+    }
+    const cats = ["all", "missing", "extra", "changed", "unmapped"];
+    try {
+      const results = await Promise.all(
+        cats.map(async (cat) => {
+          const res = await fetch(
+            `/api/jobs/${state.jobId}/entries?category=${encodeURIComponent(cat)}&offset=0&limit=1${hideQueryParam()}`
+          );
+          if (!res.ok) throw new Error("visible count failed");
+          const data = await res.json();
+          return [cat, data.total ?? 0];
+        })
+      );
+      const visible = { total: 0, missing: 0, extra: 0, changed: 0, unmapped: 0 };
+      for (const [cat, n] of results) {
+        if (cat === "all") visible.total = n;
+        else visible[cat] = n;
+      }
+      state.visibleCounts = visible;
+    } catch {
+      state.visibleCounts = null;
+    }
+  }
+
   async function refreshHiddenMeta() {
     const box = $("hiddenDiffsMeta");
     const resetBtn = $("resetHiddenBtn");
     if (!box || !resetBtn) return;
+    await refreshVisibleCounts();
     if (!state.jobId || !hasActiveHides()) {
       state.hiddenCount = 0;
       box.hidden = true;
@@ -154,16 +184,10 @@
       box.textContent = "";
       return;
     }
-    try {
-      const res = await fetch(
-        `/api/jobs/${state.jobId}/entries?category=all&offset=0&limit=1${hideQueryParam()}`
-      );
-      if (!res.ok) throw new Error("hide count failed");
-      const data = await res.json();
+    if (state.visibleCounts) {
       const total = state.counts?.total ?? 0;
-      const visible = data.total ?? 0;
-      state.hiddenCount = Math.max(0, total - visible);
-    } catch {
+      state.hiddenCount = Math.max(0, total - (state.visibleCounts.total ?? 0));
+    } else {
       state.hiddenCount = state.hide.entries.length + state.hide.parents.length;
     }
     const n = state.hiddenCount;
@@ -178,10 +202,11 @@
     state.listScrollTop = 0;
     state.selectedEntry = null;
     await bootstrapListSelection();
+    await refreshHiddenMeta();
+    renderToolbar();
     renderListShell();
     await paintList();
     await showSelectedDetail();
-    await refreshHiddenMeta();
   }
 
   function ignoreSelectedEntry() {
@@ -234,10 +259,11 @@
     state.listCache.clear();
     state.listScrollTop = 0;
     await bootstrapListSelection();
+    await refreshHiddenMeta();
+    renderToolbar();
     renderListShell();
     await paintList();
     await showSelectedDetail();
-    await refreshHiddenMeta();
   }
 
   function updateRerunBanner() {
@@ -520,14 +546,14 @@
     $("aliasRow").hidden = true;
 
     await bootstrapListSelection();
+    await refreshHiddenMeta();
     renderToolbar();
     $("workspace").hidden = false;
     renderListShell();
     await paintList();
     await showSelectedDetail();
-    await refreshHiddenMeta();
 
-    const n = state.counts?.total ?? state.filteredTotal ?? 0;
+    const n = state.visibleCounts?.total ?? state.counts?.total ?? state.filteredTotal ?? 0;
     $("statusMeta").textContent = restored
       ? `${n} difference${n === 1 ? "" : "s"} (restored)`
       : `${n} difference${n === 1 ? "" : "s"}`;
@@ -862,13 +888,14 @@
   }
 
   function renderToolbar() {
-    const counts = state.counts || {
-      total: 0,
-      missing: 0,
-      extra: 0,
-      changed: 0,
-      unmapped: 0,
-    };
+    const counts = state.visibleCounts ||
+      state.counts || {
+        total: 0,
+        missing: 0,
+        extra: 0,
+        changed: 0,
+        unmapped: 0,
+      };
     const cats = [
       ["all", "All", counts.total ?? counts.all ?? 0],
       ["missing", "Missing", counts.missing || 0],
