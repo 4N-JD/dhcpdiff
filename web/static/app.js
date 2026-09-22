@@ -499,12 +499,17 @@
     $("ignoreUnmapped").checked = !!state.defaults.ignore_unmapped;
   }
 
-  async function openJobWorkspace(data, { restored = false } = {}) {
+  async function openJobWorkspace(data, { restored = false, carryHide = null } = {}) {
     state.jobId = data.job_id;
     state.counts = data.counts;
     state.files = data.files;
     state.filter = "all";
-    state.hide = loadHideForJob(state.jobId);
+    if (carryHide != null) {
+      state.hide = normalizeHide(carryHide);
+      persistHide();
+    } else {
+      state.hide = loadHideForJob(state.jobId);
+    }
     state.listCache.clear();
     state.lineCache.clear();
     state.listScrollTop = 0;
@@ -1486,7 +1491,17 @@
 
       state.lastRunMappingYaml = serializeMappingYaml(state.mapping);
       state.lastRunIgnoreUnmapped = !!$("ignoreUnmapped").checked;
-      await openJobWorkspace(data, { restored: false });
+      const prevJobId = state.jobId;
+      const carryHide = {
+        entries: [...state.hide.entries],
+        parents: [...state.hide.parents],
+      };
+      await openJobWorkspace(data, { restored: false, carryHide });
+      if (prevJobId && prevJobId !== state.jobId) {
+        const oldKey = hideStorageKey(prevJobId);
+        localStorage.removeItem(oldKey);
+        sessionStorage.removeItem(oldKey);
+      }
       clearNeedsRerun();
       saveSession();
     } catch (err) {
