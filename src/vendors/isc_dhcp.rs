@@ -27,6 +27,7 @@ static CLIENT_ID_SUBSTRING: LazyLock<Regex> = LazyLock::new(|| {
     )
     .unwrap()
 });
+static OR_TOKEN: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?i)OR").unwrap());
 
 pub fn apply_global_statement(
     global_options: &mut OptionMap,
@@ -93,7 +94,7 @@ pub fn parse_isc_shared_network(
                 push_pending_host(b, file, vendor_id, definitions, &mut pending_hosts);
             }
             IscNode::Block(b) if is_if_block_header(&b.header) => {
-                rules.push(parse_if_block(
+                rules.extend(parse_if_block(
                     b,
                     file,
                     vendor_id,
@@ -182,7 +183,7 @@ pub fn parse_isc_subnet(
                 )?);
             }
             IscNode::Block(b) if is_if_block_header(&b.header) => {
-                rules.push(parse_if_block(
+                rules.extend(parse_if_block(
                     b,
                     file,
                     vendor_id,
@@ -222,7 +223,7 @@ pub fn parse_if_block(
     vendor_id: &str,
     definitions: &BTreeMap<String, OptionDef>,
     scope: RuleScope,
-) -> ConditionalRule {
+) -> Vec<ConditionalRule> {
     let mut vendor_option_space = None;
     for child in &block.children {
         if let IscNode::Statement(s) = child {
@@ -238,24 +239,43 @@ pub fn parse_if_block(
         }
     }
 
-    let match_expr = parse_if_condition(&block.header);
-    let declared_in = if_declared_in_label(&scope, &match_expr);
-    ConditionalRule {
-        match_expr,
-        vendor_option_space,
-        options: collect_options_from_nodes_labeled(
-            &block.children,
-            definitions,
-            vendor_id,
-            file,
-            Some(&declared_in),
-        ),
-        scope,
-        source: Some(SourceRef::with_span(vendor_id, file, block.location.line, block.location.end_line)),
-    }
+    let match_exprs = parse_if_conditions(&block.header);
+    let source = Some(SourceRef::with_span(
+        vendor_id,
+        file,
+        block.location.line,
+        block.location.end_line,
+    ));
+    let options_base = collect_options_from_nodes_labeled(
+        &block.children,
+        definitions,
+        vendor_id,
+        file,
+        None,
+    );
+
+    match_exprs
+        .into_iter()
+        .map(|match_expr| {
+            let declared_in = if_declared_in_label(&scope, &match_expr);
+            let mut options = options_base.clone();
+            for bound in options.values_mut() {
+                bound.declared_in = Some(declared_in.clone());
+            }
+            ConditionalRule {
+                match_expr,
+                vendor_option_space: vendor_option_space.clone(),
+                options,
+                scope: scope.clone(),
+                source: source.clone(),
+            }
+        })
+        .collect()
 }
 
-pub fn parse_if_condition(header: &str) -> FilterMatch {
+/// Parse an if/elsif header into one or more match expressions.
+/// OR of VCI substring arms expands to one expression per arm.
+pub fn parse_if_conditions(header: &str) -> Vec<FilterMatch> {
     let trimmed = header.trim();
     let inner = trimmed
         .strip_prefix("elsif")
@@ -265,7 +285,55 @@ pub fn parse_if_condition(header: &str) -> FilterMatch {
         .trim_start_matches('(')
         .trim_end_matches(')')
         .trim();
-    parse_match_expression(inner, "if-condition")
+    if let Some(arms) = expand_or_vci_substring_arms(inner) {
+        return arms;
+    }
+    vec![parse_match_expression(inner, "if-condition")]
+}
+
+pub fn parse_if_condition(header: &str) -> FilterMatch {
+    parse_if_conditions(header)
+        .into_iter()
+        .next()
+        .unwrap_or_else(|| FilterMatch::Opaque {
+            raw: header.to_string(),
+            kind_hint: "if-condition".to_string(),
+        })
+}
+
+/// If `inner` is solely VCI substring comparisons joined by OR, return one arm per value.
+fn expand_or_vci_substring_arms(inner: &str) -> Option<Vec<FilterMatch>> {
+    let caps: Vec<_> = VCI_SUBSTRING.captures_iter(inner).collect();
+    if caps.len() < 2 {
+        return None;
+    }
+    if !OR_TOKEN.is_match(inner) {
+        return None;
+    }
+
+    let mut leftover = String::new();
+    let mut last = 0usize;
+    let mut arms = Vec::with_capacity(caps.len());
+    for cap in &caps {
+        let whole = cap.get(0)?;
+        leftover.push_str(&inner[last..whole.start()]);
+        last = whole.end();
+        arms.push(FilterMatch::VendorClassPrefix {
+            offset: cap[1].parse().unwrap_or(0),
+            length: cap[2].parse().unwrap_or(0),
+            value: cap[3].to_string(),
+        });
+    }
+    leftover.push_str(&inner[last..]);
+
+    let without_or = OR_TOKEN.replace_all(&leftover, "");
+    if !without_or
+        .chars()
+        .all(|c| c.is_whitespace() || c == '(' || c == ')')
+    {
+        return None;
+    }
+    Some(arms)
 }
 
 pub fn parse_isc_pool(
@@ -604,3 +672,65 @@ pub fn parse_subclass_statement(text: &str) -> Option<(String, String)> {
     };
     Some((class_name, value))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn or_vci_substring_arms_expand() {
+        let arms = parse_if_conditions(
+            r#"if (substring(option vendor-class-identifier,0,20)="PXEClient:Arch:00007" OR substring(option vendor-class-identifier,0,20)="PXEClient:Arch:00009")"#,
+        );
+        assert_eq!(arms.len(), 2);
+        assert_eq!(
+            arms[0],
+            FilterMatch::VendorClassPrefix {
+                value: "PXEClient:Arch:00007".into(),
+                offset: 0,
+                length: 20,
+            }
+        );
+        assert_eq!(
+            arms[1],
+            FilterMatch::VendorClassPrefix {
+                value: "PXEClient:Arch:00009".into(),
+                offset: 0,
+                length: 20,
+            }
+        );
+    }
+
+    #[test]
+    fn and_vci_substring_arms_do_not_expand() {
+        let arms = parse_if_conditions(
+            r#"if (substring(option vendor-class-identifier,0,20)="PXEClient:Arch:00007" AND substring(option vendor-class-identifier,0,20)="PXEClient:Arch:00009")"#,
+        );
+        assert_eq!(arms.len(), 1, "AND must not expand into per-arm rules: {arms:?}");
+        // First-arm capture behavior (or Opaque if AND confuses leftover) — either way, single rule.
+        match &arms[0] {
+            FilterMatch::VendorClassPrefix { value, .. } => {
+                assert_eq!(value, "PXEClient:Arch:00007");
+            }
+            FilterMatch::Opaque { .. } => {}
+            other => panic!("unexpected match for AND condition: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn single_vci_substring_stays_one_arm() {
+        let arms = parse_if_conditions(
+            r#"if (substring(option vendor-class-identifier,0,20)="PXEClient:Arch:00000")"#,
+        );
+        assert_eq!(arms.len(), 1);
+        assert_eq!(
+            arms[0],
+            FilterMatch::VendorClassPrefix {
+                value: "PXEClient:Arch:00000".into(),
+                offset: 0,
+                length: 20,
+            }
+        );
+    }
+}
+

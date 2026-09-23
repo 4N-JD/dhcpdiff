@@ -844,6 +844,74 @@ fn bluecat_subclass_matches_infoblox_arch_if() {
 }
 
 #[test]
+fn bluecat_subclass_matches_infoblox_or_arch_if() {
+    let source = load("bluecat", fixture("scenario/pxe_or_subclass_bcn.conf"));
+    let target = load("infoblox", fixture("scenario/pxe_or_subclass_ibx.conf"));
+
+    assert!(
+        target.conditional_rules.iter().any(|r| {
+            matches!(
+                &r.match_expr,
+                FilterMatch::VendorClassPrefix { value, .. } if value == "PXEClient:Arch:00009"
+            )
+        }),
+        "Infoblox OR if should expand to an arm for Arch:00009: {:?}",
+        target
+            .conditional_rules
+            .iter()
+            .map(|r| &r.match_expr)
+            .collect::<Vec<_>>()
+    );
+
+    let report = dhcpdiff::diff::diff_configs(&source, &target);
+
+    let next_server_diffs: Vec<_> = report
+        .entries
+        .iter()
+        .filter(|e| match e {
+            DiffEntry::Changed { entity, .. }
+            | DiffEntry::MissingInTarget { entity, .. }
+            | DiffEntry::ExtraInTarget { entity, .. }
+                if entity.kind == "option"
+                    && entity.key.contains("vci=PXEClient:Arch:00009")
+                    && (entity.key.contains("bootp:0") || entity.key.contains("next-server")) =>
+            {
+                true
+            }
+            _ => false,
+        })
+        .collect();
+    assert!(
+        next_server_diffs.is_empty(),
+        "subclass 00009 and OR if (00007|00009) should agree on next-server: {:?}",
+        next_server_diffs
+    );
+
+    let bootfile_diffs: Vec<_> = report
+        .entries
+        .iter()
+        .filter(|e| match e {
+            DiffEntry::Changed { entity, .. }
+            | DiffEntry::MissingInTarget { entity, .. }
+            | DiffEntry::ExtraInTarget { entity, .. }
+                if entity.kind == "option"
+                    && entity.key.contains("vci=PXEClient:Arch:00009")
+                    && (entity.key.contains("dhcp:67")
+                        || entity.key.contains("bootfile-name")) =>
+            {
+                true
+            }
+            _ => false,
+        })
+        .collect();
+    assert!(
+        bootfile_diffs.is_empty(),
+        "subclass 00009 and OR if should agree on bootfile-name: {:?}",
+        bootfile_diffs
+    );
+}
+
+#[test]
 fn scenario_diff_only_reports_scenario_delta_options() {
     let source = load("bluecat", fixture("scenario/opti_lease_bcn.conf"));
     let target = load("infoblox", fixture("scenario/opti_lease_ibx.conf"));

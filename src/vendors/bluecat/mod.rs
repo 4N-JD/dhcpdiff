@@ -134,7 +134,7 @@ fn normalize_bluecat(doc: &IscDocument, file: &str) -> anyhow::Result<Config> {
                 );
             }
             IscNode::Block(block) if is_if_block_header(&block.header) => {
-                config.conditional_rules.push(parse_if_block(
+                config.conditional_rules.extend(parse_if_block(
                     block,
                     file,
                     "bluecat",
