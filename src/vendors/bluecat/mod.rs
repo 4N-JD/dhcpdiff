@@ -6,7 +6,7 @@ use crate::registry::{
 use crate::vendors::isc_dhcp::{
     apply_global_statement, assign_reservations_to_subnets, attach_subclass, is_if_block_header,
     parse_bluecat_match, parse_if_block, parse_isc_class, parse_isc_shared_network,
-    parse_isc_subnet, parse_subclass_statement, push_pending_host,
+    parse_isc_subnet, parse_subclass_block, parse_subclass_statement, push_pending_host,
 };
 
 pub struct BluecatPlugin;
@@ -86,6 +86,16 @@ fn normalize_bluecat(doc: &IscDocument, file: &str) -> anyhow::Result<Config> {
                     &config.option_definitions,
                     parse_bluecat_match,
                 )?);
+            }
+            IscNode::Block(block) if block.header.starts_with("subclass ") => {
+                if let Some((class_name, value)) = parse_subclass_statement(&block.header) {
+                    attach_subclass(&mut config.global_filters, &class_name, &value);
+                }
+                if let Some(rule) =
+                    parse_subclass_block(block, file, "bluecat", &config.option_definitions)
+                {
+                    config.conditional_rules.push(rule);
+                }
             }
             IscNode::Block(block) if block.header.starts_with("shared-network ") => {
                 let (shared, subnets, hosts, rules) = parse_isc_shared_network(

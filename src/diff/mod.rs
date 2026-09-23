@@ -1115,12 +1115,13 @@ fn parse_option_display(key: &str) -> EntityDisplay {
 }
 
 fn split_option_key(key: &str) -> (String, String, Option<String>) {
-    // Prefer explicit VCI marker.
+    // Prefer explicit VCI marker. Peel option suffix from the right so VCIs that
+    // contain colons (e.g. PXEClient:Arch:00000) stay intact.
     if let Some(idx) = key.find(":vci=") {
         let before = &key[..idx];
         let after = &key[idx + ":vci=".len()..];
-        if let Some((vci, rest)) = after.split_once(':') {
-            return (before.to_string(), rest.to_string(), Some(vci.to_string()));
+        if let Some((vci, option)) = peel_option_suffix(after) {
+            return (before.to_string(), option, Some(vci));
         }
         return (before.to_string(), String::new(), Some(after.to_string()));
     }
@@ -1334,6 +1335,19 @@ mod tests {
         assert_eq!(d.vci.as_deref(), Some("PXEClient"));
         assert_eq!(d.option_id.as_deref(), Some("bootp:0"));
         assert!(d.summary.contains("affects clients with VCI PXEClient"));
+    }
+
+    #[test]
+    fn entity_display_keeps_colonful_arch_vci_intact() {
+        let e = entity(
+            "option",
+            "pool:10.64.112.0/23:10.64.112.2-10.64.113.249:vci=PXEClient:Arch:00000:isc:0 (default-lease-time)",
+        );
+        let d = e.display.expect("display");
+        assert_eq!(d.name, "isc:0 (default-lease-time)");
+        assert_eq!(d.vci.as_deref(), Some("PXEClient:Arch:00000"));
+        assert_eq!(d.option_id.as_deref(), Some("isc:0"));
+        assert!(d.summary.contains("affects clients with VCI PXEClient:Arch:00000"));
     }
 
     #[test]

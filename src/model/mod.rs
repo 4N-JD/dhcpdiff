@@ -16,4 +16,4 @@ pub use option::{
 };
 pub use scenario::ClientScenario;
 pub use source::{LocationRef, SideLocations, SourceRef};
-pub use value::NormalizedValue;
+pub use value::{extract_quoted_isc, unescape_isc_string, NormalizedValue};

@@ -58,5 +58,31 @@ subnet 10.0.0.0 netmask 255.255.255.0 {
         );
         assert!(parse_lease_time_statement("option dhcp-lease-time 3600;").is_none());
     }
+
+    #[test]
+    fn lexer_preserves_escapes_for_option_value_normalization() {
+        let via_double = parse_isc(r#"option bootfile-name "SMSBoot\\x86\\wdsnbp.com";"#).unwrap();
+        let via_hex = parse_isc(r#"option bootfile-name "SMSBoot\x5cx86\x5cwdsnbp.com";"#).unwrap();
+        let text = |doc: &IscDocument| {
+            let IscNode::Statement(stmt) = &doc.nodes[0] else {
+                panic!("expected statement");
+            };
+            stmt.text.clone()
+        };
+        // Lexer must keep escapes intact (not strip one backslash level).
+        assert!(text(&via_double).contains(r"\\x86"), "got {}", text(&via_double));
+        assert!(text(&via_hex).contains(r"\x5c"), "got {}", text(&via_hex));
+
+        let (_, v1) = parse_option_statement(&text(&via_double)).unwrap();
+        let (_, v2) = parse_option_statement(&text(&via_hex)).unwrap();
+        assert_eq!(
+            NormalizedValue::from_raw_text(&v1),
+            NormalizedValue::from_raw_text(&v2)
+        );
+        assert_eq!(
+            NormalizedValue::from_raw_text(&v1),
+            NormalizedValue::String(r"SMSBoot\x86\wdsnbp.com".into())
+        );
+    }
 }
 

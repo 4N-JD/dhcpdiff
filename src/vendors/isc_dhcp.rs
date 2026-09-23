@@ -521,10 +521,7 @@ fn parse_match_expression(inner: &str, default_hint: &str) -> FilterMatch {
 }
 
 pub fn extract_quoted(s: &str) -> Option<String> {
-    let start = s.find('"')?;
-    let rest = &s[start + 1..];
-    let end = rest.find('"')?;
-    Some(rest[..end].to_string())
+    crate::model::extract_quoted_isc(s).map(|(decoded, _)| decoded)
 }
 
 pub fn assign_reservations_to_subnets(subnets: &mut [Subnet], reservations: Vec<Reservation>) {
@@ -552,10 +549,54 @@ pub fn attach_subclass(
     }
 }
 
+/// Parse a BlueCat/ISC `subclass "Class" "value" { ... }` block into a global
+/// conditional rule matched by exact vendor-class identifier.
+pub fn parse_subclass_block(
+    block: &IscBlock,
+    file: &str,
+    vendor_id: &str,
+    definitions: &BTreeMap<String, OptionDef>,
+) -> Option<ConditionalRule> {
+    let (class_name, value) = parse_subclass_statement(&block.header)?;
+    let mut vendor_option_space = None;
+    for child in &block.children {
+        if let IscNode::Statement(s) = child {
+            let text = s.text.trim();
+            if text.starts_with("vendor-option-space ") {
+                vendor_option_space = Some(
+                    text.strip_prefix("vendor-option-space ")
+                        .unwrap_or("")
+                        .trim_end_matches(';')
+                        .to_string(),
+                );
+            }
+        }
+    }
+    let declared_in = format!("Subclass {class_name} / {value}");
+    Some(ConditionalRule {
+        match_expr: FilterMatch::VendorClassExact { value },
+        vendor_option_space,
+        options: collect_options_from_nodes_labeled(
+            &block.children,
+            definitions,
+            vendor_id,
+            file,
+            Some(&declared_in),
+        ),
+        scope: RuleScope::Global,
+        source: Some(SourceRef::with_span(
+            vendor_id,
+            file,
+            block.location.line,
+            block.location.end_line,
+        )),
+    })
+}
+
 pub fn parse_subclass_statement(text: &str) -> Option<(String, String)> {
     let text = text.trim().strip_prefix("subclass ")?.trim_end_matches(';').trim();
-    let class_name = extract_quoted(text)?;
-    let after_name = text[text.find(&format!("\"{class_name}\""))? + class_name.len() + 2..].trim();
+    let (class_name, after_idx) = crate::model::extract_quoted_isc(text)?;
+    let after_name = text[after_idx..].trim();
     let value = if after_name.starts_with('"') {
         extract_quoted(after_name)?
     } else {

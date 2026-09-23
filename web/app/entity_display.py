@@ -139,9 +139,12 @@ def _split_option_key(key: str) -> tuple[str, str, str | None]:
     if idx >= 0:
         before = key[:idx]
         after = key[idx + len(marker) :]
-        if ":" in after:
-            vci, rest = after.split(":", 1)
-            return before, rest, vci
+        # Peel option suffix from the right so VCIs that contain colons
+        # (e.g. PXEClient:Arch:00000) stay intact.
+        peeled = _peel_option_suffix(after)
+        if peeled:
+            vci, option = peeled
+            return before, option, vci
         return before, "", after
 
     peeled = _peel_option_suffix(key)

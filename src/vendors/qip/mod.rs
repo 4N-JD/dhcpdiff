@@ -249,10 +249,7 @@ fn parse_qip_vendor_class(
 }
 
 fn extract_quoted(s: &str) -> Option<String> {
-    let start = s.find('"')?;
-    let rest = &s[start + 1..];
-    let end = rest.find('"')?;
-    Some(rest[..end].to_string())
+    crate::model::extract_quoted_isc(s).map(|(decoded, _)| decoded)
 }
 
 fn netmask_to_prefix(mask: Ipv4Addr) -> anyhow::Result<u8> {

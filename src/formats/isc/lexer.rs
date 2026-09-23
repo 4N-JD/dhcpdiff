@@ -82,6 +82,9 @@ impl<'a> Lexer<'a> {
     }
 
     fn read_string(&mut self, quote: char) -> String {
+        // Preserve escape sequences literally so NormalizedValue / extract_quoted_isc
+        // can apply full ISC unescape once. Still skip the escaped char so \" does
+        // not terminate the string.
         let mut out = String::new();
         self.bump();
         while let Some(ch) = self.peek_char() {
@@ -90,6 +93,7 @@ impl<'a> Lexer<'a> {
                 break;
             }
             if ch == '\\' {
+                out.push('\\');
                 if let Some(esc) = self.bump() {
                     out.push(esc);
                 }

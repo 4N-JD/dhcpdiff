@@ -109,6 +109,18 @@ class EntityDisplayTests(unittest.TestCase):
         self.assertEqual(d["vci"], "PXEClient")
         self.assertIn("affects clients with VCI PXEClient", d["summary"])
 
+    def test_option_with_colonful_arch_vci(self):
+        d = build_entity_display(
+            "option",
+            "pool:10.64.112.0/23:10.64.112.2-10.64.113.249:vci=PXEClient:Arch:00000:isc:0 (default-lease-time)",
+        )
+        self.assertEqual(d["name"], "isc:0 (default-lease-time)")
+        self.assertEqual(d["option_id"], "isc:0")
+        self.assertEqual(d["vci"], "PXEClient:Arch:00000")
+        self.assertIn(
+            "affects clients with VCI PXEClient:Arch:00000", d["summary"]
+        )
+
     def test_pool_and_filter_parent_key(self):
         pool = build_entity_display("pool", "10.0.80.0/24:10.0.80.1-10.0.80.10")
         self.assertEqual(pool["parent_key"], "10.0.80.0/24")

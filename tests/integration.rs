@@ -726,6 +726,124 @@ fn pxeclient_substring_bcn_matches_ibx_if() {
 }
 
 #[test]
+fn bluecat_subclass_block_applies_arch_vci_options() {
+    let config = load("bluecat", fixture("scenario/pxe_subclass_bcn.conf"));
+
+    let arch_rule = config
+        .conditional_rules
+        .iter()
+        .find(|r| {
+            matches!(
+                &r.match_expr,
+                FilterMatch::VendorClassExact { value } if value == "PXEClient:Arch:00000"
+            )
+        })
+        .expect("subclass Arch:00000 should become a conditional rule");
+    assert!(
+        arch_rule
+            .options
+            .contains_key(&OptionKey::isc_default_lease_time()),
+        "subclass options should include default-lease-time: {:?}",
+        arch_rule.options.keys().collect::<Vec<_>>()
+    );
+
+    let scenarios = discover_scenarios(&config);
+    assert!(
+        scenarios
+            .iter()
+            .any(|s| s.vendor_class.as_deref() == Some("PXEClient:Arch:00000")),
+        "subclass value should be discovered as a VCI scenario: {:?}",
+        scenarios
+    );
+
+    let subnet = &config.subnets[0];
+    let pool = &subnet.pools[0];
+    let with_arch = effective_client_options(
+        &config,
+        subnet,
+        Some(pool),
+        None,
+        &ClientScenario::with_vendor_class("PXEClient:Arch:00000"),
+    );
+    assert_eq!(
+        with_arch
+            .get(&OptionKey::isc_default_lease_time())
+            .map(|b| &b.value),
+        Some(&dhcpdiff::model::NormalizedValue::Int(86400)),
+        "Arch:00000 scenario should apply subclass lease 86400, not subnet 3600: {:?}",
+        with_arch.get(&OptionKey::isc_default_lease_time())
+    );
+
+    let baseline = effective_client_options(
+        &config,
+        subnet,
+        Some(pool),
+        None,
+        &ClientScenario::baseline(),
+    );
+    assert_eq!(
+        baseline
+            .get(&OptionKey::isc_default_lease_time())
+            .map(|b| &b.value),
+        Some(&dhcpdiff::model::NormalizedValue::Int(3600)),
+        "baseline should keep subnet lease 3600: {:?}",
+        baseline.get(&OptionKey::isc_default_lease_time())
+    );
+}
+
+#[test]
+fn bluecat_subclass_matches_infoblox_arch_if() {
+    let source = load("bluecat", fixture("scenario/pxe_subclass_bcn.conf"));
+    let target = load("infoblox", fixture("scenario/pxe_subclass_ibx.conf"));
+    let report = dhcpdiff::diff::diff_configs(&source, &target);
+
+    let lease_diffs: Vec<_> = report
+        .entries
+        .iter()
+        .filter(|e| match e {
+            DiffEntry::Changed { entity, .. }
+            | DiffEntry::MissingInTarget { entity, .. }
+            | DiffEntry::ExtraInTarget { entity, .. }
+                if entity.kind == "option"
+                    && entity.key.contains("vci=PXEClient:Arch:00000")
+                    && entity.key.contains("isc:0") =>
+            {
+                true
+            }
+            _ => false,
+        })
+        .collect();
+    assert!(
+        lease_diffs.is_empty(),
+        "BlueCat subclass and Infoblox Arch if should agree on default-lease-time: {:?}",
+        lease_diffs
+    );
+
+    let bootfile_diffs: Vec<_> = report
+        .entries
+        .iter()
+        .filter(|e| match e {
+            DiffEntry::Changed { entity, .. }
+            | DiffEntry::MissingInTarget { entity, .. }
+            | DiffEntry::ExtraInTarget { entity, .. }
+                if entity.kind == "option"
+                    && entity.key.contains("vci=PXEClient:Arch:00000")
+                    && (entity.key.contains("dhcp:67")
+                        || entity.key.contains("bootfile-name")) =>
+            {
+                true
+            }
+            _ => false,
+        })
+        .collect();
+    assert!(
+        bootfile_diffs.is_empty(),
+        "SMSBoot \\\\ vs \\x5c spellings should be equivalent for bootfile-name: {:?}",
+        bootfile_diffs
+    );
+}
+
+#[test]
 fn scenario_diff_only_reports_scenario_delta_options() {
     let source = load("bluecat", fixture("scenario/opti_lease_bcn.conf"));
     let target = load("infoblox", fixture("scenario/opti_lease_ibx.conf"));
